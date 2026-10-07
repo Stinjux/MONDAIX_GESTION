@@ -3,7 +3,9 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
+import { creerControleAcces, estLocal, routePublique } from './lib/acces.js';
 import { ErreurMetier, ecrireParametre, lireParametre, ouvrirBase } from './db.js';
 import * as fournisseurs from './services/fournisseurs.js';
 import * as sheets from './services/importSheets.js';
@@ -14,6 +16,7 @@ import * as envois from './services/envois.js';
 import * as autorisations from './services/autorisations.js';
 import * as emails from './services/emails.js';
 import * as tdb from './services/tableauDeBord.js';
+import * as synchro from './services/synchroEmail.js';
 
 const DOSSIER_PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -127,11 +130,13 @@ export function creerRoutes(db) {
   r('DELETE', '/api/dossiers/:id', ({ p }) => autorisations.supprimerDossier(db, +p.id));
 
   // Emails (Gmail → commandes, Neo → autorisations)
-  r('GET', '/api/emails/sources', () => emails.etatSources(db));
-  r('PUT', '/api/emails/sources/:source', ({ p, corps }) => {
-    if (!(p.source in emails.SOURCES_EMAIL)) throw new ErreurMetier('Source inconnue.', 404);
-    const conf = JSON.parse(lireParametre(db, `email.${p.source}`) || '{}');
-    ecrireParametre(db, `email.${p.source}`, JSON.stringify({ ...conf, adresse: corps.adresse ?? conf.adresse, module: emails.SOURCES_EMAIL[p.source].module }));
+  r('GET', '/api/emails/sources', () => emails.etatSources(db).map((s) => ({ ...s, synchro: synchro.etatSynchro(db, s.source) })));
+  r('POST', '/api/emails/synchroniser', async ({ corps }) => {
+    if (corps.source) {
+      if (!(corps.source in emails.SOURCES_EMAIL)) throw new ErreurMetier('Source inconnue.', 404);
+      return [await synchro.synchroniserSource(db, corps.source)];
+    }
+    return synchro.synchroniserTout(db);
   });
   r('GET', '/api/emails', ({ q }) => emails.listerEmails(db, { source: q.get('source'), statut: q.get('statut') }));
   r('GET', '/api/emails/:id', ({ p }) => emails.lireEmail(db, +p.id));
@@ -228,10 +233,20 @@ async function servirStatique(res, chemin) {
   }
 }
 
-export function creerServeur(db) {
+export function creerServeur(db, { acces = {} } = {}) {
   const routes = creerRoutes(db);
+  const controler = creerControleAcces(acces);
   return createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    if (!routePublique(req.method, url.pathname)) {
+      const verdict = controler(req);
+      if (verdict === 'bloque') return repondre(res, 429, { erreur: 'Trop de tentatives. Réessayez dans 15 minutes.' });
+      if (verdict === 'refuse') {
+        res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Mondaix Gestion", charset="UTF-8"', 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Authentification requise.');
+      }
+    }
+    if (url.pathname === '/sante') return repondre(res, 200, { ok: true });
     if (!url.pathname.startsWith('/api/')) return servirStatique(res, decodeURIComponent(url.pathname));
     try {
       for (const route of routes) {
@@ -253,8 +268,23 @@ export function creerServeur(db) {
   });
 }
 
+/** Charge le fichier .env s'il existe (les variables déjà définies sont prioritaires). */
+export function chargerEnv(chemin = '.env') {
+  if (existsSync(chemin)) process.loadEnvFile(chemin);
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  chargerEnv();
   const port = Number(process.env.PORT) || 3000;
   const hote = process.env.HOST || '127.0.0.1';
-  creerServeur(ouvrirBase()).listen(port, hote, () => console.log(`Mondaix Gestion : http://${hote}:${port}`));
+  const motDePasse = process.env.MONDAIX_MOT_DE_PASSE || '';
+  if (!estLocal(hote) && !motDePasse && process.env.MONDAIX_SANS_AUTH !== '1') {
+    console.error('Refus de démarrer : l’application est exposée (HOST=' + hote + ') sans MONDAIX_MOT_DE_PASSE.');
+    process.exit(1);
+  }
+  const db = ouvrirBase();
+  creerServeur(db, { acces: { utilisateur: process.env.MONDAIX_UTILISATEUR || 'admin', motDePasse } }).listen(port, hote, () =>
+    console.log(`Mondaix Gestion : http://${hote}:${port}${motDePasse ? ' (protégé par mot de passe)' : ''}`),
+  );
+  synchro.planifierSynchro(db);
 }

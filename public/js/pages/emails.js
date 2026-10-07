@@ -1,5 +1,6 @@
 import { api, post, esc, montant, date, badge, tableau, modale, champ, selecteur, selecteurTriEtat, tenter, toast, references, lireFichierTexte } from '../outils.js';
 import { rafraichir } from '../app.js';
+import { synchroniser } from './divers.js';
 
 const STATUTS = {
   non_rapproche: ['non rapproché', 'alerte'],
@@ -17,8 +18,11 @@ export async function pageEmails(zone, source) {
   zone.innerHTML = `
     <div class="entete"><div><h1>${esc(src.libelle)} · ${estGmail ? 'confirmations de commandes' : 'réponses d’autorisation'}</h1>
       <p class="aide">${esc(src.role)}. Ces emails alimentent uniquement le module <strong>${estGmail ? 'Commandes fournisseurs' : 'Dossiers d’autorisation'}</strong>.
-      ${src.connecte ? '' : 'Aucune connexion active : importez les emails (.eml), collez-les ou saisissez-les.'}</p></div>
-      <div class="actions"><button id="importer-eml">Importer des .eml</button><button id="saisir">Saisir / coller un email</button>
+      ${src.synchro.configuree
+        ? `Connexion IMAP configurée · objet contenant ${src.synchro.mots_cles_objet.map((m) => `« ${esc(m)} »`).join(' ou ')}${src.synchro.expediteurs.length ? ` · expéditeurs ${esc(src.synchro.expediteurs.join(', '))}` : ''} · depuis le ${date(src.synchro.date_depart)}${src.synchro.derniere_synchro ? ` · dernière synchronisation ${new Date(src.synchro.derniere_synchro).toLocaleString('fr-CA')}` : ''}.`
+        : 'Aucune connexion active : importez les emails (.eml), collez-les ou saisissez-les.'}</p>
+      ${src.synchro.derniere_erreur ? `<div class="message erreur">${esc(src.synchro.derniere_erreur)}</div>` : ''}</div>
+      <div class="actions">${src.synchro.configuree ? `<button class="principal" id="synchroniser">Synchroniser</button>` : ''}<button id="importer-eml">Importer des .eml</button><button id="saisir">Saisir / coller un email</button>
       <button id="relancer">Relancer le rapprochement</button></div></div>
     <input type="file" id="fichiers-eml" accept=".eml,message/rfc822" multiple hidden>
     <div class="onglets">${[['a_traiter', `À traiter (${src.a_traiter})`], ['valide', 'Rapprochés'], ['ignore', 'Ignorés'], ['tous', 'Tous']]
@@ -29,6 +33,7 @@ export async function pageEmails(zone, source) {
       'Aucun email.',
     )}`;
 
+  zone.querySelector('#synchroniser')?.addEventListener('click', (ev) => synchroniser(ev.currentTarget, source));
   zone.querySelector('#importer-eml').onclick = () => zone.querySelector('#fichiers-eml').click();
   zone.querySelector('#fichiers-eml').onchange = async (ev) => {
     const fichiers = await Promise.all([...ev.target.files].map(lireFichierTexte));

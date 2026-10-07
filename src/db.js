@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS emails (
   statut_rapprochement TEXT NOT NULL DEFAULT 'non_rapproche'
     CHECK (statut_rapprochement IN ('non_rapproche', 'propose', 'ambigu', 'valide', 'ignore')),
   mode_rapprochement TEXT,                     -- auto (référence exacte unique) ou manuel
-  mode_saisie TEXT NOT NULL DEFAULT 'manuel',  -- eml, manuel, webhook
+  mode_saisie TEXT NOT NULL DEFAULT 'manuel',  -- eml, manuel, webhook, imap
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (source, message_id),
   CHECK ((source = 'gmail' AND module = 'commandes') OR (source = 'neo' AND module = 'autorisations')),
@@ -230,8 +230,6 @@ CREATE INDEX IF NOT EXISTS idx_dossiers_asin ON dossiers_autorisation(asin);
 `;
 
 const PARAMETRES_DEFAUT = {
-  'email.gmail': JSON.stringify({ module: 'commandes', adresse: '', connecte: false }),
-  'email.neo': JSON.stringify({ module: 'autorisations', adresse: '', connecte: false }),
   'email.webhook_token': '',
   'couts.inclure_taxes': '0',
   'rapprochement.tolerance': '0.02',

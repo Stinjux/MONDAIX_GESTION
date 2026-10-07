@@ -77,7 +77,7 @@ function htmlVersTexte(html) {
     .trim();
 }
 
-function extrairePartiesTexte(entetes, corps) {
+function extrairePartiesTexte(entetes, corps, binaire = false) {
   const type = entetes['content-type'] || 'text/plain';
   const encodage = (entetes['content-transfer-encoding'] || '').toLowerCase();
   if (/^multipart\//i.test(type)) {
@@ -88,7 +88,7 @@ function extrairePartiesTexte(entetes, corps) {
       if (!morceau.trim()) return [];
       const partie = separerEntetes(morceau);
       if (!Object.keys(partie.entetes).length) return [];
-      return extrairePartiesTexte(partie.entetes, partie.corps);
+      return extrairePartiesTexte(partie.entetes, partie.corps, binaire);
     });
   }
   if (!/^text\/(plain|html)/i.test(type)) return [];
@@ -96,14 +96,23 @@ function extrairePartiesTexte(entetes, corps) {
   let texte = corps;
   if (encodage === 'base64') texte = decoderBase64(corps, charset);
   else if (encodage === 'quoted-printable') texte = decoderQuotedPrintable(corps, charset);
+  else if (binaire) texte = decoderOctets(octetsBinaires(corps), charset || 'utf-8');
   else if (charset && !/utf-?8|us-ascii/i.test(charset)) texte = decoderOctets(octetsBinaires(corps), charset);
   return [{ html: /html/i.test(type), texte }];
 }
 
-/** Analyse un email brut (.eml) → { messageId, expediteur, sujet, date, corps }. */
+/**
+ * Analyse un email brut (.eml) → { messageId, expediteur, sujet, date, corps }.
+ * Accepte un texte (fichier lu par le navigateur) ou les octets reçus par IMAP (Buffer).
+ */
 export function parserEml(brut) {
-  const { entetes, corps } = separerEntetes(String(brut));
-  const parties = extrairePartiesTexte(entetes, corps);
+  const binaire = Buffer.isBuffer(brut);
+  const { entetes, corps } = separerEntetes(binaire ? brut.toString('latin1') : String(brut));
+  if (binaire) {
+    // En-têtes UTF-8 non encodés (RFC 6532)
+    for (const cle of Object.keys(entetes)) entetes[cle] = decoderOctets(octetsBinaires(entetes[cle]), 'utf-8');
+  }
+  const parties = extrairePartiesTexte(entetes, corps, binaire);
   const texte = parties.find((p) => !p.html);
   const html = parties.find((p) => p.html);
   let corpsTexte = texte ? texte.texte : html ? htmlVersTexte(html.texte) : corps;

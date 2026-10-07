@@ -75,14 +75,10 @@ export async function pageParametres(zone) {
   zone.innerHTML = `
     <h1>Paramètres &amp; sources</h1>
     <h2>Sources email</h2>
-    <p class="aide">Chaque boîte alimente un seul module. La saisie manuelle, l’import de fichiers .eml et les imports CSV fonctionnent sans aucune connexion email.</p>
-    ${tableau(
-      ['Boîte', 'Rôle', 'Module alimenté', 'Adresse', 'Connexion', { t: 'Emails', classe: 'num' }, ''],
-      sources.map((s) => `<tr><td><strong>${esc(s.libelle)}</strong></td><td>${esc(s.role)}</td>
-        <td>${s.module === 'commandes' ? '<a href="#/commandes">Commandes fournisseurs</a>' : '<a href="#/autorisations">Dossiers d’autorisation</a>'}</td>
-        <td>${esc(s.adresse || '—')}</td><td>${s.connecte ? badge('connectée', 'ok') : badge('non connectée — import manuel', '')}</td>
-        <td class="num">${s.total}</td><td><button class="petit" data-adresse="${s.source}">Adresse</button></td></tr>`),
-    )}
+    <p class="aide">Chaque boîte alimente un seul module. Connexion IMAP en lecture seule : aucun message n’est supprimé, déplacé ni marqué comme lu.
+    Les identifiants se règlent dans le fichier <span class="mono">.env</span> du serveur, jamais dans l’interface.
+    La saisie manuelle, l’import de fichiers .eml et les imports CSV restent disponibles sans connexion.</p>
+    ${sources.map(carteSource).join('')}
     <div class="carte">
       <h3 style="margin-top:0">Réception automatique (facultatif)</h3>
       <p class="aide">Un outil externe (Apps Script Gmail, règle de transfert, n8n, Zapier…) peut envoyer chaque email reçu à
@@ -97,18 +93,55 @@ export async function pageParametres(zone) {
       <div class="actions" style="margin-top:10px">${champ('tolerance', 'Tolérance de rapprochement des montants ($)', { valeur: params.tolerance })}
         <button id="enregistrer-calculs" style="align-self:flex-end">Enregistrer</button></div>
     </div>`;
-  zone.querySelectorAll('[data-adresse]').forEach((b) => {
-    b.onclick = async () => {
-      const s = sources.find((x) => x.source === b.dataset.adresse);
-      if (await modale({ titre: `Adresse ${s.libelle}`, contenu: `<div class="champs">${champ('adresse', 'Adresse email', { valeur: s.adresse })}</div>`, valider: (d) => put(`/api/emails/sources/${s.source}`, d) })) rafraichir();
-    };
-  });
+  zone.querySelectorAll('[data-synchro]').forEach((b) => (b.onclick = () => synchroniser(b, b.dataset.synchro)));
   zone.querySelector('#enregistrer-jeton').onclick = async () => {
     if ((await tenter(() => put('/api/parametres', { webhook_token: zone.querySelector('#f-webhook_token').value }), 'Jeton enregistré.')) !== undefined) rafraichir();
   };
   zone.querySelector('#enregistrer-calculs').onclick = async () => {
     await tenter(() => put('/api/parametres', { inclure_taxes: zone.querySelector('#inclure-taxes').checked, tolerance: zone.querySelector('#f-tolerance').value }), 'Paramètres enregistrés.');
   };
+}
+
+function carteSource(s) {
+  const y = s.synchro;
+  const etat = !y.configuree
+    ? badge('non connectée — import manuel', '')
+    : y.derniere_erreur
+      ? badge('erreur', 'erreur')
+      : y.derniere_reussite
+        ? badge('connectée', 'ok')
+        : badge('configurée, jamais synchronisée', 'info');
+  const b = y.dernier_bilan;
+  return `<div class="carte">
+    <div class="entete" style="margin-bottom:6px"><div><h3 style="margin:0">${esc(s.libelle)} ${etat}</h3>
+      <p class="aide" style="margin:2px 0 0">${esc(s.role)} → ${s.module === 'commandes' ? '<a href="#/commandes">Commandes fournisseurs</a>' : '<a href="#/autorisations">Dossiers d’autorisation</a>'}</p></div>
+      ${y.configuree ? `<button data-synchro="${s.source}" ${y.en_cours ? 'disabled' : ''}>${y.en_cours ? 'Synchronisation…' : 'Synchroniser maintenant'}</button>` : ''}</div>
+    <div class="champs" style="margin-bottom:0">
+      <div><label>Compte</label>${esc(y.utilisateur || 'non configuré')}${y.hote ? ` <span class="aide">(${esc(y.hote)})</span>` : ''}</div>
+      <div><label>Dossier lu</label>${esc(y.dossier === '\\All' ? 'Tous les messages' : y.dossier)}</div>
+      <div><label>Objet contenant</label>${y.mots_cles_objet.map((m) => badge(m, 'info')).join(' ')}</div>
+      <div><label>Expéditeurs</label>${y.expediteurs.length ? y.expediteurs.map((d) => badge(d)).join(' ') : 'tous'}</div>
+      <div><label>Depuis le</label>${date(y.date_depart)}</div>
+      <div><label>Dernière synchronisation</label>${y.derniere_synchro ? new Date(y.derniere_synchro).toLocaleString('fr-CA') : '—'}
+        ${b ? `<div class="aide">${b.examines} examiné(s) · ${b.retenus} retenu(s) · ${b.importes} importé(s)</div>` : ''}</div>
+      <div><label>Emails reçus</label>${s.total}</div>
+    </div>
+    ${y.derniere_erreur ? `<div class="message erreur" style="margin:10px 0 0">${esc(y.derniere_erreur)}</div>` : ''}
+  </div>`;
+}
+
+export async function synchroniser(bouton, source) {
+  bouton.disabled = true;
+  bouton.textContent = 'Synchronisation…';
+  const r = await tenter(() => post('/api/emails/synchroniser', { source }));
+  if (r) {
+    for (const x of r) {
+      if (x.echec) toast(`${x.source} : ${x.echec}`, true);
+      else if (x.ignoree) toast(`${x.source} : ${x.motif}`);
+      else toast(`${x.source} : ${x.importes} nouvel(s) email(s), ${x.retenus} correspondant aux filtres sur ${x.examines} examiné(s).`);
+    }
+  }
+  rafraichir();
 }
 
 export async function pageJournal(zone) {

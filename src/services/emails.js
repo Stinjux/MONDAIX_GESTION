@@ -32,7 +32,6 @@ export function lireEmail(db, id) {
 
 export function etatSources(db) {
   return Object.entries(SOURCES_EMAIL).map(([source, def]) => {
-    const conf = JSON.parse(lireParametre(db, `email.${source}`) || '{}');
     const stats = db
       .prepare(
         `SELECT COUNT(*) AS total,
@@ -40,7 +39,7 @@ export function etatSources(db) {
          FROM emails WHERE source = ?`,
       )
       .get(source);
-    return { source, ...def, adresse: conf.adresse || '', connecte: Boolean(conf.connecte), total: stats.total, a_traiter: stats.a_traiter || 0 };
+    return { source, ...def, total: stats.total, a_traiter: stats.a_traiter || 0 };
   });
 }
 
@@ -69,8 +68,8 @@ export function ingererEmail(db, source, message, modeSaisie = 'manuel') {
   return { id, doublon: false };
 }
 
-export function ingererEml(db, source, brut) {
-  return ingererEmail(db, source, parserEml(brut), 'eml');
+export function ingererEml(db, source, brut, modeSaisie = 'eml') {
+  return ingererEmail(db, source, parserEml(brut), modeSaisie);
 }
 
 /* ------------------------------------------------------------ rapprochement */

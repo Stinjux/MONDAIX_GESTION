@@ -4,15 +4,32 @@ Suivi des achats fournisseurs, des coûts, des envois Amazon et des demandes d�
 
 ## Démarrage
 
-Prérequis : Node.js 22.5 ou plus récent. Aucune dépendance à installer (SQLite intégré à Node).
+Prérequis : Node.js 22.5 ou plus récent (SQLite intégré à Node). Seule dépendance : `imapflow` (lecture IMAP).
 
 ```bash
-npm start          # http://127.0.0.1:3000
-npm test           # tests des règles métier
+npm install
+cp .env.example .env   # puis compléter
+npm start              # http://127.0.0.1:3000
+npm run synchro        # synchronisation email ponctuelle (Gmail + Neo)
+npm test               # tests des règles métier
 ```
 
-Variables facultatives : `PORT`, `HOST`, `MONDAIX_DB` (chemin de la base, défaut `data/mondaix.sqlite`),
-`MONDAIX_WEBHOOK_TOKEN` (jeton du webhook email si non défini dans les paramètres).
+La configuration se fait par variables d'environnement, ou par un fichier `.env` lu au démarrage
+(voir `.env.example`) : `PORT`, `HOST`, `MONDAIX_DB`, `MONDAIX_UTILISATEUR`, `MONDAIX_MOT_DE_PASSE`,
+`MONDAIX_WEBHOOK_TOKEN`, et les variables `GMAIL_*`, `NEO_*`, `EMAIL_*` de la synchronisation.
+
+## Hébergement
+
+- Exposée sur Internet (`HOST` autre que `127.0.0.1`), l'application **refuse de démarrer sans
+  `MONDAIX_MOT_DE_PASSE`**. L'accès est alors protégé par identifiant / mot de passe (authentification HTTP Basic),
+  avec blocage temporaire après 20 échecs en 15 minutes. Servir l'application en **HTTPS** (fourni par l'hébergeur ou un proxy).
+- Routes publiques : `GET /sante` (contrôle de santé) et le webhook email (protégé par son propre jeton).
+- La base SQLite doit être sur un **disque persistant** (`MONDAIX_DB`, volume `/app/data` dans le conteneur).
+- Un `Dockerfile` est fourni : `docker build -t mondaix .` puis
+  `docker run -p 3000:3000 -v mondaix-data:/app/data --env-file .env mondaix`.
+- La synchronisation email tourne dans le serveur toutes les `EMAIL_SYNCHRO_MINUTES` minutes (10 par défaut).
+  Sur un hébergement qui met l'application en veille, planifier plutôt `npm run synchro` (cron).
+
 
 ## Règles appliquées
 
@@ -25,9 +42,16 @@ Variables facultatives : `PORT`, `HOST`, `MONDAIX_DB` (chemin de la base, défau
 
 - Un email Gmail ne peut être rattaché qu’à une commande, une réponse Neo qu’à un dossier.
   Cette règle est vérifiée par l’application **et** par des contraintes de la base.
-- Aucune connexion n’est requise : import de fichiers `.eml`, copier-coller ou saisie manuelle.
+- **Connexion IMAP en lecture seule** (dossiers ouverts en lecture seule : rien n’est supprimé, déplacé ni marqué comme lu) :
+  - Gmail : messages dont l’**objet contient « order » ou « shopping »** (début de mot, majuscules indifférentes),
+    dans « Tous les messages » pour inclure les emails archivés. Connexion par mot de passe d’application Google.
+  - Neo : messages **envoyés par amazon.com ou amazon.ca** (sous-domaines compris) dont l’**objet contient « brand approval »**.
+  - Uniquement les emails reçus **depuis le 1er août 2026** (`EMAIL_DATE_DEPART`), puis de façon incrémentale.
+  - Filtres modifiables par variables d’environnement (`*_MOTS_CLES_OBJET`, `*_EXPEDITEURS`, `*_DOSSIER`).
+  - État, filtres actifs, dernière synchronisation et erreurs visibles dans Paramètres ; bouton « Synchroniser maintenant ».
+- Sans connexion, tout reste utilisable : import de fichiers `.eml`, copier-coller ou saisie manuelle.
   Les imports CSV et la saisie manuelle des commandes fonctionnent indépendamment des emails.
-- Réception automatique facultative : `POST /api/emails/{gmail|neo}/webhook` avec l’en-tête
+- Réception par webhook (alternative) : `POST /api/emails/{gmail|neo}/webhook` avec l’en-tête
   `X-Mondaix-Token` et un corps JSON `{ message_id, from, subject, date, text }` ou `{ raw }` (source .eml).
   À brancher sur un script Gmail (Apps Script), une règle de transfert, n8n, etc.
 
@@ -83,7 +107,8 @@ Sources acceptées : fichier CSV/TSV exporté, copier-coller des cellules, lien 
 
 ```
 src/
-  server.js              API JSON + fichiers statiques
+  server.js              API JSON + fichiers statiques, protection par mot de passe
+  synchro.js             synchronisation email en ligne de commande
   db.js                  schéma SQLite, transactions, journal
   lib/                   lecture CSV, montants/dates/ASIN/domaines, emails .eml, mapping des colonnes
   services/
@@ -94,6 +119,7 @@ src/
     envois.js            envois Amazon
     autorisations.js     dossiers d’autorisation
     emails.js            sources Gmail / Neo, rapprochement
+    synchroEmail.js      synchronisation IMAP (filtres, incrémental, lecture seule)
     tableauDeBord.js     éléments à rapprocher
 public/                  interface web (HTML/CSS/JS sans framework)
 test/                    tests node:test
