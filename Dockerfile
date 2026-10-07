@@ -6,8 +6,9 @@ RUN npm ci --omit=dev
 COPY app.cjs ./
 COPY src ./src
 COPY public ./public
-# La base SQLite doit être sur un volume persistant monté sur /app/data.
-VOLUME ["/app/data"]
+# La base SQLite doit être sur un volume persistant monté sur /app/data
+# (volume Railway, ou « docker run -v mondaix-data:/app/data »). Pas d'instruction VOLUME :
+# Railway la refuse.
 EXPOSE 3000
 HEALTHCHECK CMD wget -qO- http://127.0.0.1:${PORT}/sante || exit 1
 CMD ["node", "--disable-warning=ExperimentalWarning", "app.cjs"]

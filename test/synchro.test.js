@@ -5,7 +5,7 @@ import { configSource, correspondFiltre, synchroniserSource, etatSynchro } from 
 import { listerEmails } from '../src/services/emails.js';
 import { creerCommande } from '../src/services/commandes.js';
 import { creerControleAcces, routePublique } from '../src/lib/acces.js';
-import { estExposee } from '../src/demarrer.js';
+import { estExposee, verifierStockage } from '../src/demarrer.js';
 
 const ENV = {
   GMAIL_UTILISATEUR: 'moi@gmail.com',
@@ -141,4 +141,11 @@ test('exposition détectée : hôte public, production ou cPanel / Passenger', (
   assert.equal(estExposee({ HOST: '0.0.0.0' }), true);
   assert.equal(estExposee({ NODE_ENV: 'production' }), true);
   assert.equal(estExposee({ PASSENGER_APP_ENV: 'production' }), true);
+});
+
+test('Railway : la base doit être sur le volume persistant', () => {
+  assert.equal(verifierStockage({}, '/app/data/mondaix.sqlite'), null, 'hors Railway : pas de contrôle');
+  assert.match(verifierStockage({ RAILWAY_ENVIRONMENT: 'production' }, '/app/data/mondaix.sqlite'), /Aucun volume/);
+  assert.equal(verifierStockage({ RAILWAY_ENVIRONMENT: 'production', RAILWAY_VOLUME_MOUNT_PATH: '/app/data' }, '/app/data/mondaix.sqlite'), null);
+  assert.match(verifierStockage({ RAILWAY_ENVIRONMENT: 'production', RAILWAY_VOLUME_MOUNT_PATH: '/data' }, '/app/data/mondaix.sqlite'), /pas sur le volume/);
 });

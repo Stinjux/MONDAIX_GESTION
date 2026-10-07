@@ -1,5 +1,6 @@
 // Démarrage du serveur web et de la synchronisation email.
 import { ouvrirBase } from './db.js';
+import { relative, isAbsolute } from 'node:path';
 import { chargerEnv, cheminBase } from './env.js';
 import { estLocal } from './lib/acces.js';
 import { creerServeur } from './server.js';
@@ -13,6 +14,21 @@ export function estExposee(env = process.env, hote = env.HOST || '127.0.0.1') {
   return !estLocal(hote) || env.NODE_ENV === 'production' || 'PASSENGER_APP_ENV' in env || typeof globalThis.PhusionPassenger !== 'undefined';
 }
 
+/**
+ * Sur Railway, la base doit se trouver sur le volume persistant ; sinon elle serait
+ * effacée à chaque redéploiement. Retourne un message d'erreur, ou null si tout va bien.
+ */
+export function verifierStockage(env = process.env, chemin = cheminBase()) {
+  if (!('RAILWAY_ENVIRONMENT' in env || 'RAILWAY_PROJECT_ID' in env) || env.MONDAIX_SANS_VOLUME === '1') return null;
+  const volume = env.RAILWAY_VOLUME_MOUNT_PATH;
+  if (!volume) return 'Aucun volume Railway attaché : ajoutez un volume monté sur /app/data, sinon les données seront perdues à chaque redéploiement.';
+  const rel = relative(volume, chemin);
+  if (chemin === ':memory:' || rel.startsWith('..') || isAbsolute(rel)) {
+    return `La base (${chemin}) n’est pas sur le volume Railway (${volume}) : montez le volume sur /app/data ou ajustez MONDAIX_DB.`;
+  }
+  return null;
+}
+
 export function demarrer() {
   chargerEnv();
   const port = Number(process.env.PORT) || 3000;
@@ -20,6 +36,12 @@ export function demarrer() {
   const motDePasse = process.env.MONDAIX_MOT_DE_PASSE || '';
   if (estExposee() && !motDePasse && process.env.MONDAIX_SANS_AUTH !== '1') {
     const message = 'Refus de démarrer : application exposée sur Internet sans MONDAIX_MOT_DE_PASSE (à définir dans .env).';
+    console.error(message);
+    throw new Error(message);
+  }
+  const erreurStockage = verifierStockage();
+  if (erreurStockage) {
+    const message = `Refus de démarrer : ${erreurStockage}`;
     console.error(message);
     throw new Error(message);
   }

@@ -20,13 +20,15 @@ La configuration se fait par variables d'environnement, ou par un fichier `.env`
 
 ## Hébergement
 
-Guide pas à pas pour HostMetro / cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.md).
+Guide pas à pas pour **Railway** (hébergement retenu) : [docs/HEBERGEMENT-RAILWAY.md](docs/HEBERGEMENT-RAILWAY.md).
+Alternative cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.md).
 
 - Exposée sur Internet (`HOST` autre que `127.0.0.1`), l'application **refuse de démarrer sans
   `MONDAIX_MOT_DE_PASSE`**. L'accès est alors protégé par identifiant / mot de passe (authentification HTTP Basic),
   avec blocage temporaire après 20 échecs en 15 minutes. Servir l'application en **HTTPS** (fourni par l'hébergeur ou un proxy).
 - Routes publiques : `GET /sante` (contrôle de santé) et le webhook email (protégé par son propre jeton).
 - La base SQLite doit être sur un **disque persistant** (`MONDAIX_DB`, volume `/app/data` dans le conteneur).
+  Sur Railway, l'application refuse de démarrer si la base n'est pas sur le volume attaché.
 - Un `Dockerfile` est fourni : `docker build -t mondaix .` puis
   `docker run -p 3000:3000 -v mondaix-data:/app/data --env-file .env mondaix`.
 - La synchronisation email tourne dans le serveur toutes les `EMAIL_SYNCHRO_MINUTES` minutes (10 par défaut).
