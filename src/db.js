@@ -2,6 +2,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { cheminBase } from './env.js';
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -235,9 +236,12 @@ const PARAMETRES_DEFAUT = {
   'rapprochement.tolerance': '0.02',
 };
 
-export function ouvrirBase(chemin = process.env.MONDAIX_DB || 'data/mondaix.sqlite') {
+export function ouvrirBase(chemin = cheminBase()) {
   if (chemin !== ':memory:') mkdirSync(dirname(chemin), { recursive: true });
   const db = new DatabaseSync(chemin);
+  // Le site et la tâche planifiée de synchronisation peuvent écrire en même temps.
+  db.exec('PRAGMA busy_timeout = 10000;');
+  if (chemin !== ':memory:') db.exec('PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
   const inserer = db.prepare('INSERT OR IGNORE INTO parametres (cle, valeur) VALUES (?, ?)');
   for (const [cle, valeur] of Object.entries(PARAMETRES_DEFAUT)) inserer.run(cle, valeur);

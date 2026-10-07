@@ -4,7 +4,7 @@ Suivi des achats fournisseurs, des coûts, des envois Amazon et des demandes d�
 
 ## Démarrage
 
-Prérequis : Node.js 22.5 ou plus récent (SQLite intégré à Node). Seule dépendance : `imapflow` (lecture IMAP).
+Prérequis : Node.js 22.13 ou plus récent (SQLite intégré à Node). Seule dépendance : `imapflow` (lecture IMAP).
 
 ```bash
 npm install
@@ -20,6 +20,8 @@ La configuration se fait par variables d'environnement, ou par un fichier `.env`
 
 ## Hébergement
 
+Guide pas à pas pour HostMetro / cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.md).
+
 - Exposée sur Internet (`HOST` autre que `127.0.0.1`), l'application **refuse de démarrer sans
   `MONDAIX_MOT_DE_PASSE`**. L'accès est alors protégé par identifiant / mot de passe (authentification HTTP Basic),
   avec blocage temporaire après 20 échecs en 15 minutes. Servir l'application en **HTTPS** (fourni par l'hébergeur ou un proxy).
@@ -28,7 +30,10 @@ La configuration se fait par variables d'environnement, ou par un fichier `.env`
 - Un `Dockerfile` est fourni : `docker build -t mondaix .` puis
   `docker run -p 3000:3000 -v mondaix-data:/app/data --env-file .env mondaix`.
 - La synchronisation email tourne dans le serveur toutes les `EMAIL_SYNCHRO_MINUTES` minutes (10 par défaut).
-  Sur un hébergement qui met l'application en veille, planifier plutôt `npm run synchro` (cron).
+  Sur un hébergement qui met l'application en veille (cPanel / Passenger), mettre `EMAIL_SYNCHRO_MINUTES=0`
+  et planifier `node src/synchro.js` (cron).
+- Point d'entrée unique : `app.cjs` (npm start, Docker, cPanel « Setup Node.js App »). Sous Passenger ou avec
+  `NODE_ENV=production`, l'application est considérée comme exposée et exige le mot de passe.
 
 
 ## Règles appliquées

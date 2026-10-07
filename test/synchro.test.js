@@ -5,6 +5,7 @@ import { configSource, correspondFiltre, synchroniserSource, etatSynchro } from 
 import { listerEmails } from '../src/services/emails.js';
 import { creerCommande } from '../src/services/commandes.js';
 import { creerControleAcces, routePublique } from '../src/lib/acces.js';
+import { estExposee } from '../src/demarrer.js';
 
 const ENV = {
   GMAIL_UTILISATEUR: 'moi@gmail.com',
@@ -133,4 +134,11 @@ test('accès protégé par mot de passe, webhook et /sante publics', () => {
   assert.ok(routePublique('GET', '/sante'));
   assert.ok(!routePublique('GET', '/api/commandes'));
   assert.equal(creerControleAcces({})(req()), 'ok', 'sans mot de passe (usage local) : ouvert');
+});
+
+test('exposition détectée : hôte public, production ou cPanel / Passenger', () => {
+  assert.equal(estExposee({}), false);
+  assert.equal(estExposee({ HOST: '0.0.0.0' }), true);
+  assert.equal(estExposee({ NODE_ENV: 'production' }), true);
+  assert.equal(estExposee({ PASSENGER_APP_ENV: 'production' }), true);
 });

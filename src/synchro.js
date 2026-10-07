@@ -1,12 +1,12 @@
 // Synchronisation email en ligne de commande (pour une tâche planifiée / cron).
 //   node src/synchro.js          → Gmail et Neo
 //   node src/synchro.js neo      → une seule source
-import { existsSync } from 'node:fs';
 import { ouvrirBase } from './db.js';
+import { chargerEnv, cheminBase } from './env.js';
 import { synchroniserSource, synchroniserTout } from './services/synchroEmail.js';
 
-if (existsSync('.env')) process.loadEnvFile('.env');
-const db = ouvrirBase();
+chargerEnv();
+const db = ouvrirBase(cheminBase());
 const source = process.argv[2];
 const resultats = source ? [await synchroniserSource(db, source)] : await synchroniserTout(db);
 let echec = false;

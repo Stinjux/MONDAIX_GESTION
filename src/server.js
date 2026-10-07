@@ -3,10 +3,9 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
-import { creerControleAcces, estLocal, routePublique } from './lib/acces.js';
-import { ErreurMetier, ecrireParametre, lireParametre, ouvrirBase } from './db.js';
+import { creerControleAcces, routePublique } from './lib/acces.js';
+import { ErreurMetier, ecrireParametre, lireParametre } from './db.js';
 import * as fournisseurs from './services/fournisseurs.js';
 import * as sheets from './services/importSheets.js';
 import * as inventaire from './services/inventaire.js';
@@ -266,25 +265,4 @@ export function creerServeur(db, { acces = {} } = {}) {
       repondre(res, 500, { erreur: 'Erreur interne.' });
     }
   });
-}
-
-/** Charge le fichier .env s'il existe (les variables déjà définies sont prioritaires). */
-export function chargerEnv(chemin = '.env') {
-  if (existsSync(chemin)) process.loadEnvFile(chemin);
-}
-
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  chargerEnv();
-  const port = Number(process.env.PORT) || 3000;
-  const hote = process.env.HOST || '127.0.0.1';
-  const motDePasse = process.env.MONDAIX_MOT_DE_PASSE || '';
-  if (!estLocal(hote) && !motDePasse && process.env.MONDAIX_SANS_AUTH !== '1') {
-    console.error('Refus de démarrer : l’application est exposée (HOST=' + hote + ') sans MONDAIX_MOT_DE_PASSE.');
-    process.exit(1);
-  }
-  const db = ouvrirBase();
-  creerServeur(db, { acces: { utilisateur: process.env.MONDAIX_UTILISATEUR || 'admin', motDePasse } }).listen(port, hote, () =>
-    console.log(`Mondaix Gestion : http://${hote}:${port}${motDePasse ? ' (protégé par mot de passe)' : ''}`),
-  );
-  synchro.planifierSynchro(db);
 }

@@ -5,14 +5,15 @@
   "description": "Gestion des commandes fournisseurs, coûts, envois Amazon et autorisations de vente (Mondaix).",
   "type": "module",
   "engines": {
-    "node": ">=22.5"
+    "node": ">=22.13"
   },
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "start": "node --disable-warning=ExperimentalWarning app.cjs",
     "synchro": "node --disable-warning=ExperimentalWarning src/synchro.js",
     "test": "node --disable-warning=ExperimentalWarning --test"
   },
   "dependencies": {
     "imapflow": "^1.7.8"
-  }
+  },
+  "main": "app.cjs"
 }
