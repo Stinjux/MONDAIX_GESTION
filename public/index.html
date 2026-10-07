@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mondaix Gestion</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="barre">
+    <a class="logo" href="#/">Mondaix <span>Gestion</span></a>
+    <button class="menu-mobile" id="menu-mobile" aria-label="Menu">☰</button>
+  </header>
+  <div class="cadre">
+    <nav id="nav">
+      <a href="#/" data-route="">Tableau de bord</a>
+      <div class="nav-titre">Achats</div>
+      <a href="#/import-sheets" data-route="import-sheets">Import Google Sheets</a>
+      <a href="#/commandes" data-route="commandes">Commandes</a>
+      <a href="#/factures" data-route="factures">Factures</a>
+      <a href="#/emails/gmail" data-route="emails/gmail">Gmail · confirmations</a>
+      <a href="#/fournisseurs" data-route="fournisseurs">Fournisseurs</a>
+      <div class="nav-titre">Produits &amp; coûts</div>
+      <a href="#/produits" data-route="produits">ASIN &amp; coûts</a>
+      <a href="#/depenses" data-route="depenses">Dépenses</a>
+      <a href="#/envois" data-route="envois">Envois Amazon</a>
+      <div class="nav-titre">Autorisations Amazon</div>
+      <a href="#/autorisations" data-route="autorisations">Dossiers</a>
+      <a href="#/emails/neo" data-route="emails/neo">Neo · réponses</a>
+      <div class="nav-titre">Système</div>
+      <a href="#/parametres" data-route="parametres">Paramètres &amp; sources</a>
+      <a href="#/journal" data-route="journal">Journal</a>
+    </nav>
+    <main id="contenu"></main>
+  </div>
+  <dialog id="modale"><form method="dialog" id="modale-form"></form></dialog>
+  <div id="toasts"></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

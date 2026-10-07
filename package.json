@@ -1,0 +1,12 @@
+{
+  "name": "mondaix-gestion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gestion des commandes fournisseurs, coûts, envois Amazon et autorisations de vente (Mondaix).",
+  "type": "module",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  }
+}
