@@ -1,4 +1,4 @@
-import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, toast, definirDomaineAmazon } from '../outils.js';
+import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, toast, definirDomaineAmazon, asinLien } from '../outils.js';
 import { rafraichir } from '../app.js';
 import { carteDepot, brancherDepot } from './documents.js';
 
@@ -28,21 +28,20 @@ export async function pageFournisseurs(zone) {
 }
 
 export async function pageFactures(zone) {
-  const [factures, commandes, docs] = await Promise.all([api('/api/factures'), api('/api/commandes'), api('/api/factures/documents?statut=a_valider')]);
-  const optionsCommandes = [['', '— aucune —'], ...commandes.map((c) => [c.id, `${c.numero_commande || '#' + c.id} · ${c.fournisseur || '?'} · ${montant(c.total_declare)}`])];
+  const [factures, docs] = await Promise.all([api('/api/factures'), api('/api/factures/documents?statut=a_valider')]);
   zone.innerHTML = `
     <div class="entete"><div><h1>Factures</h1>
-      <p class="aide">Une facture saisie avec un n° de commande est rattachée automatiquement si ce numéro correspond à une seule commande ; sinon, elle reste à rattacher.</p></div>
+      <p class="aide">Chaque article d’une facture est associé à un ASIN ; aucune commande n’est nécessaire.</p></div>
       <button id="nouvelle">Saisie manuelle</button></div>
     ${carteDepot(docs)}
     <h2>Factures enregistrées</h2>
     ${tableau(
-      ['N°', 'Date', 'Fournisseur', 'Réf. commande', { t: 'Sous-total HT', classe: 'num' }, { t: 'Total', classe: 'num' }, 'Commande', ''],
+      ['N°', 'Date', 'Fournisseur', 'Articles (ASIN)', { t: 'Sous-total HT', classe: 'num' }, { t: 'Total', classe: 'num' }, ''],
       factures.map(
-        (f) => `<tr><td>${esc(f.numero_facture || '—')}</td><td>${date(f.date_facture)}</td><td>${esc(f.fournisseur || '—')}</td><td class="mono">${esc(f.numero_commande_ref || '—')}</td>
+        (f) => `<tr><td>${esc(f.numero_facture || '—')}</td><td>${date(f.date_facture)}</td><td>${esc(f.fournisseur || '—')}</td>
+          <td>${f.lignes.map((l) => `${asinLien(l.asin)} × ${l.quantite}${l.prix_unitaire_ht !== null ? ` @ ${montant(l.prix_unitaire_ht)}` : ''}`).join('<br>') || '<span class="aide">—</span>'}</td>
           <td class="num">${montant(f.sous_total_ht)}</td><td class="num">${montant(f.total_calcule)}</td>
-          <td>${f.commande_id ? `<a href="#/commandes/${f.commande_id}">${esc(f.numero_commande || '#' + f.commande_id)}</a>` : badge('à rattacher', 'alerte')}</td>
-          <td class="actions">${f.document_id ? `<a class="bouton petit" href="/api/factures/documents/${f.document_id}/fichier" target="_blank" rel="noopener">Document</a>` : ''}<button class="petit" data-rattacher="${f.id}">Rattacher</button><button class="petit danger" data-suppr="${f.id}">Supprimer</button></td></tr>`,
+          <td class="actions">${f.document_id ? `<a class="bouton petit" href="/api/factures/documents/${f.document_id}/fichier" target="_blank" rel="noopener">Document</a>` : ''}<button class="petit danger" data-suppr="${f.id}">Supprimer</button></td></tr>`,
       ),
       'Aucune facture.',
     )}`;
@@ -50,27 +49,13 @@ export async function pageFactures(zone) {
   zone.querySelector('#nouvelle').onclick = async () => {
     const r = await modale({
       titre: 'Nouvelle facture',
-      contenu: `<div class="champs">${champ('numero_facture', 'N° de facture')}${champ('numero_commande_ref', 'N° de commande indiqué')}${champ('date_facture', 'Date', { type: 'date' })}
-        ${selecteur('commande_id', 'Commande (si connue)', optionsCommandes)}
-        ${champ('sous_total_ht', 'Sous-total HT')}${champ('taxes', 'Taxes')}${champ('livraison', 'Livraison')}${champ('autres_frais', 'Autres frais')}${champ('total', 'Total facturé')}</div>`,
+      contenu: `<div class="champs">${champ('numero_facture', 'N° de facture')}${champ('date_facture', 'Date', { type: 'date' })}
+        ${champ('sous_total_ht', 'Sous-total HT')}${champ('taxes', 'Taxes')}${champ('livraison', 'Livraison')}${champ('autres_frais', 'Autres frais')}${champ('total', 'Total facturé')}</div>
+        <p class="aide">Pour associer les articles à des ASIN, déposez plutôt le PDF ou la photo de la facture.</p>`,
       valider: (d) => post('/api/factures', d),
     });
-    if (!r) return;
-    if (r.proposition?.ambigu) toast('Plusieurs commandes portent ce numéro : rattachez la facture manuellement.');
-    else if (!r.commande_id) toast('Aucune commande ne correspond : facture à rattacher.');
-    rafraichir();
+    if (r) rafraichir();
   };
-  zone.querySelectorAll('[data-rattacher]').forEach((b) => {
-    b.onclick = async () => {
-      const f = factures.find((x) => x.id === Number(b.dataset.rattacher));
-      const ok = await modale({
-        titre: 'Rattacher la facture',
-        contenu: `<div class="champs">${selecteur('commande_id', 'Commande', optionsCommandes, f.commande_id || '')}</div>`,
-        valider: (d) => put(`/api/factures/${f.id}/commande`, d),
-      });
-      if (ok) rafraichir();
-    };
-  });
   zone.querySelectorAll('[data-suppr]').forEach((b) => (b.onclick = async () => (await tenter(() => suppr(`/api/factures/${b.dataset.suppr}`))) !== undefined && rafraichir()));
 }
 

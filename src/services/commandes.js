@@ -250,7 +250,8 @@ export function supprimerFacture(db, id) {
 export function listerFactures(db, { sansCommande = false } = {}) {
   return db
     .prepare(
-      `SELECT f.*, c.numero_commande, fo.nom AS fournisseur,
+      `SELECT f.*, c.numero_commande,
+         COALESCE(fo.nom, (SELECT json_extract(d.extraction, '$.fournisseur') FROM facture_documents d WHERE d.facture_id = f.id)) AS fournisseur,
          (SELECT d.id FROM facture_documents d WHERE d.facture_id = f.id) AS document_id
        FROM factures f
        LEFT JOIN commandes c ON c.id = f.commande_id
@@ -259,7 +260,11 @@ export function listerFactures(db, { sansCommande = false } = {}) {
        ORDER BY f.id DESC`,
     )
     .all()
-    .map((f) => ({ ...f, total_calcule: totalFacture(f) }));
+    .map((f) => ({
+      ...f,
+      total_calcule: totalFacture(f),
+      lignes: db.prepare('SELECT asin, quantite, prix_unitaire_ht FROM facture_lignes WHERE facture_id = ? ORDER BY id').all(f.id),
+    }));
 }
 
 /**

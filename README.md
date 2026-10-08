@@ -104,12 +104,12 @@ Sources acceptées : fichier CSV/TSV exporté, copier-coller des cellules, lien 
 - Si `ANTHROPIC_API_KEY` est définie, les données sont extraites par l'API Claude (sortie JSON contrainte) :
   fournisseur, n° de facture, n° de commande, date, sous-total HT, taxes, livraison, total et articles.
   Sans clé, la facture s'affiche à côté du formulaire pour une saisie manuelle.
-- Écran de vérification : aperçu du document, commande proposée (n° de commande, sinon montant), et pour chaque
-  article un **ASIN proposé** (ASIN écrit sur la facture, seul article de la commande, même quantité qu'une ligne
-  de la commande, ou titre ressemblant) — toujours modifiable. Un article = un ASIN ; un article sans ASIN n'est pas enregistré.
-- À l'enregistrement : facture créée (lignes par ASIN, coûts unitaires ajoutés à l'historique sans écraser le coût
-  retenu, livraison/taxes/autres frais en dépenses de la commande). Le document reste consultable depuis la facture,
-  la commande et la fiche ASIN.
+- Écran de vérification : aperçu du document et, pour chaque article, un **ASIN proposé** (ASIN écrit sur la
+  facture, commande portant le même n° de commande, titre ressemblant) — toujours modifiable. Un article = un ASIN ;
+  un article sans ASIN n'est pas enregistré. **Aucune commande n'est demandée** : la facture est enregistrée seule.
+- À l'enregistrement : facture créée avec ses lignes par ASIN (coûts unitaires ajoutés à l'historique sans écraser
+  le coût retenu). Le document reste consultable depuis la liste des factures et la fiche ASIN. Les factures déjà
+  rattachées à une commande auparavant le restent.
 
 ### 4. Rapprochement
 

@@ -1,4 +1,4 @@
-import { api, post, suppr, esc, montant, date, badge, toast, tenter, modale, asinLien } from '../outils.js';
+import { api, post, suppr, esc, montant, date, badge, toast, tenter, modale } from '../outils.js';
 import { rafraichir } from '../app.js';
 
 const TYPES = 'application/pdf,image/jpeg,image/png,image/webp,image/gif';
@@ -87,10 +87,9 @@ function ligneHtml(l, i, prop) {
 }
 
 export async function pageDocument(zone, id) {
-  const [d, commandes, produits] = await Promise.all([api(`/api/factures/documents/${id}`), api('/api/commandes'), api('/api/produits')]);
+  const [d, produits] = await Promise.all([api(`/api/factures/documents/${id}`), api('/api/produits')]);
   const x = d.extraction || { lignes: [] };
   const prop = d.propositions;
-  const commandeProposee = prop.commande?.id || '';
   const estPdf = d.type_mime === 'application/pdf';
   const url = `/api/factures/documents/${d.id}/fichier`;
   let lignes = (x.lignes || []).map((l, i) => ({ ...l, _prop: prop.lignes[i] }));
@@ -109,16 +108,7 @@ export async function pageDocument(zone, id) {
         : `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="Aperçu de la facture"></a>`}
         <p class="aide"><a href="${url}" target="_blank" rel="noopener">Ouvrir le document dans un nouvel onglet</a></p></div>
       <form id="form-facture" class="carte">
-        <h3 style="margin-top:0">Commande</h3>
-        <div class="champs"><div><label for="f-commande">Commande correspondante</label>
-          <select id="f-commande" name="commande_id"><option value="">— aucune (facture à rattacher) —</option>
-          ${commandes.map((c) => `<option value="${c.id}" ${String(c.id) === String(commandeProposee) ? 'selected' : ''}>${esc(c.numero_commande || '#' + c.id)} · ${esc(c.fournisseur || '?')} · ${montant(c.total_declare)}</option>`).join('')}
-          </select>
-          ${prop.commande ? `<div class="aide" style="margin:2px 0 0">proposée d’après ${x.numero_commande ? 'le n° de commande' : 'le montant'}</div>` : prop.commandes_possibles.length > 1 ? `<div class="aide" style="margin:2px 0 0">${prop.commandes_possibles.length} commandes possibles : à choisir</div>` : ''}</div>
-          <div><label for="f-ref">N° de commande sur la facture</label><input id="f-ref" name="numero_commande_ref" value="${esc(x.numero_commande || '')}"></div></div>
-        <div id="asins-commande" class="aide"></div>
-
-        <h3>Facture</h3>
+        <h3 style="margin-top:0">Facture</h3>
         <div class="champs">
           <div><label for="f-num">N° de facture</label><input id="f-num" name="numero_facture" value="${esc(x.numero_facture || '')}"></div>
           <div><label for="f-date">Date</label><input id="f-date" name="date_facture" type="date" value="${esc(x.date_facture || '')}"></div>
@@ -144,15 +134,6 @@ export async function pageDocument(zone, id) {
 
   const form = zone.querySelector('#form-facture');
   const tbody = zone.querySelector('#lignes');
-  const majAsinsCommande = async () => {
-    const cid = form.querySelector('#f-commande').value;
-    const cible = zone.querySelector('#asins-commande');
-    if (!cid) return (cible.innerHTML = '');
-    const c = await api(`/api/commandes/${cid}`);
-    cible.innerHTML = c.lignes.length ? `ASIN de cette commande : ${c.lignes.map((l) => `${asinLien(l.asin, { fiche: false })} × ${l.quantite}${l.titre ? ` (${esc(l.titre)})` : ''}`).join(' · ')}` : '';
-  };
-  form.querySelector('#f-commande').onchange = majAsinsCommande;
-  majAsinsCommande();
 
   const brancherRetirer = () =>
     tbody.querySelectorAll('[data-retirer]').forEach((b) => (b.onclick = () => b.closest('tr').remove()));
@@ -187,7 +168,6 @@ export async function pageDocument(zone, id) {
     const r = await tenter(() => post(`/api/factures/documents/${d.id}/valider`, { ...donnees, lignes: articles.filter((a) => a.asin) }), 'Facture enregistrée.');
     bouton.disabled = false;
     if (!r) return;
-    if (r.proposition?.ambigu) toast('Plusieurs commandes portent ce numéro : rattachez la facture depuis la page Factures.');
-    location.hash = r.commande_id ? `#/commandes/${r.commande_id}` : '#/factures';
+    location.hash = '#/factures';
   };
 }

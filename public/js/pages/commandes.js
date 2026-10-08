@@ -151,7 +151,7 @@ export async function pageCommande(zone, id) {
       ),
       'Aucune facture.',
     )}
-    <div class="actions"><button id="ajout-facture">+ Saisir la facture</button><a class="bouton" href="#/factures">Déposer un PDF / une photo de facture</a></div>
+    <button id="ajout-facture">+ Saisir la facture</button>
 
     <h2>Réceptions</h2>
     ${tableau(

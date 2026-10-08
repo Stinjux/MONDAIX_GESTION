@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { ouvrirBase } from '../src/db.js';
 import { deposerDocument, extraireAvecClaude, extraireDocument, validerDocument, supprimerDocument, lireDocument, propositions } from '../src/services/documentsFactures.js';
-import { creerCommande, lireCommande, supprimerFacture } from '../src/services/commandes.js';
+import { creerCommande, lireCommande, supprimerFacture, listerFactures } from '../src/services/commandes.js';
 import { coutRetenu } from '../src/services/couts.js';
 
 const dossier = mkdtempSync(join(tmpdir(), 'mondaix-docs-'));
@@ -105,4 +105,19 @@ test('appel à l’API Claude : PDF en bloc document, image en bloc image, sorti
   await assert.rejects(extraireAvecClaude({ donnees: Buffer.from('x'), typeMime: 'image/png' }, { client: client({ stop_reason: 'refusal', content: [] }) }), /refusée/);
   const enPanne = { beta: { messages: { create: async () => { throw new Anthropic.AuthenticationError(401, { error: {} }, 'invalid x-api-key', new Headers()); } } } };
   await assert.rejects(extraireAvecClaude({ donnees: Buffer.from('x'), typeMime: 'image/png' }, { client: enPanne }), /Clé ANTHROPIC_API_KEY refusée/);
+});
+
+test('facture déposée enregistrée sans commande : articles associés aux ASIN, aucune commande requise', async () => {
+  creerCommande(db, { numero_commande: 'W-2001', lignes: [{ asin: 'B0AAAAAAA1', quantite: 2 }] });
+  const d = await deposerDocument(db, { nom: 'libre.pdf', type: 'application/pdf', donnees: Buffer.from('%PDF libre').toString('base64') }, { extraire: extraireFaux });
+  const f = validerDocument(db, d.id, {
+    numero_facture: 'INV-77', date_facture: '2026-10-01', total: 96.98,
+    lignes: [{ asin: 'B0AAAAAAA1', quantite: 2, prix_unitaire_ht: 25 }, { asin: 'B0AAAAAAA2', quantite: 3, prix_unitaire_ht: 10 }],
+  });
+  assert.equal(f.commande_id, null, 'pas de rattachement implicite à la commande W-2001');
+  const [facture] = listerFactures(db);
+  assert.equal(facture.commande_id, null);
+  assert.deepEqual(facture.lignes.map((l) => l.asin), ['B0AAAAAAA1', 'B0AAAAAAA2']);
+  assert.equal(facture.document_id, d.id);
+  assert.equal(facture.fournisseur, 'Walmart Canada', 'fournisseur lu sur la facture');
 });

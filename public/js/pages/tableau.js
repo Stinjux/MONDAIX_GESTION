@@ -131,8 +131,6 @@ export async function pageTableauDeBord(zone) {
         <td class="num">${montant(e.valeur)}</td><td>${esc(e.source)} ${esc(e.reference || '')}</td><td class="num">${montant(e.ecart)}</td></tr>`),
     )}` : ''}
 
-    ${t.factures_sans_commande.length ? `<h2>Factures sans commande (${t.factures_sans_commande.length})</h2>
-      <p class="aide">À rattacher depuis <a href="#/factures">Factures</a>.</p>` : ''}
     ${t.lignes_envoi_sans_commande.length ? `<h2>Lignes d’envoi Amazon sans commande d’origine (${t.lignes_envoi_sans_commande.length})</h2>
       ${tableau(['Envoi', 'ASIN', { t: 'Qté', classe: 'num' }], t.lignes_envoi_sans_commande.map((l) => `<tr><td><a href="#/envois/${l.envoi_id}">${esc(l.numero_envoi || '#' + l.envoi_id)}</a></td><td>${asinLien(l.asin)}</td><td class="num">${l.quantite}</td></tr>`))}` : ''}
   `;
