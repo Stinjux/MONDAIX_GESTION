@@ -150,3 +150,26 @@ pre.corps { white-space: pre-wrap; background: var(--neutre-doux); padding: 10px
   main { padding: 16px; }
   .deux-colonnes { grid-template-columns: 1fr; }
 }
+
+/* Envois : glisser-déposer des ASIN */
+.envoi-composition { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 14px; align-items: start; }
+.zone-depot { position: relative; transition: border-color .15s, background .15s; }
+.zone-depot.attente { border: 2px dashed var(--accent); }
+.zone-depot.survol { background: var(--accent-doux); }
+.zone-depot .depot-indice { display: none; }
+.zone-depot.attente .depot-indice { display: block; text-align: center; padding: 14px; color: var(--accent); font-weight: 600; }
+.palette-asins { position: sticky; top: 10px; max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+.palette-asins input { width: 100%; margin-bottom: 8px; }
+.liste-asins { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.asin-glissable { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--bord); border-radius: var(--rayon); margin-bottom: 6px; background: var(--surface); cursor: grab; }
+.asin-glissable:hover { border-color: var(--accent); }
+.asin-glissable.en-glisse { opacity: .5; }
+.asin-glissable.deja { background: var(--neutre-doux); }
+.asin-glissable .poignee { color: var(--doux); letter-spacing: -2px; }
+.asin-glissable .asin-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.asin-glissable .asin-info .aide { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.asin-glissable .asin-stock { color: var(--doux); font-size: 12px; white-space: nowrap; }
+@media (max-width: 900px) {
+  .envoi-composition { grid-template-columns: 1fr; }
+  .palette-asins { position: static; max-height: 360px; }
+}

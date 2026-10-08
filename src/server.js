@@ -124,7 +124,7 @@ export function creerRoutes(db) {
   r('PUT', '/api/envois/:id', ({ p, corps }) => envois.modifierEnvoi(db, +p.id, corps));
   r('DELETE', '/api/envois/:id', ({ p }) => envois.supprimerEnvoi(db, +p.id));
   r('POST', '/api/envois/:id/lignes', ({ p, corps }) => envois.ajouterLigneEnvoi(db, +p.id, corps));
-  r('PUT', '/api/envoi-lignes/:id', ({ p, corps }) => envois.rattacherLigneEnvoi(db, +p.id, corps.commande_id ? +corps.commande_id : null));
+  r('PUT', '/api/envoi-lignes/:id', ({ p, corps }) => envois.modifierLigneEnvoi(db, +p.id, corps));
   r('DELETE', '/api/envoi-lignes/:id', ({ p }) => envois.supprimerLigneEnvoi(db, +p.id));
   r('GET', '/api/asin/:asin/commandes', ({ p }) => envois.commandesPourAsin(db, p.asin));
 

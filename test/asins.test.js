@@ -205,3 +205,18 @@ test('dépense par ASIN : part de chaque facture au prorata du HT, frais compris
   assert.equal(db.prepare("SELECT COUNT(*) n FROM factures WHERE numero_facture = 'F-3'").get().n, 1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM couts_achat WHERE asin = 'B0AAAAAAA4'").get().n, 1);
 });
+
+test('envoi : n° et date d’expédition saisis à la main, ASIN ajoutés puis quantité modifiée', async () => {
+  const { modifierEnvoi, ajouterLigneEnvoi, modifierLigneEnvoi, lireEnvoi } = await import('../src/services/envois.js');
+  const id = creerEnvoi(db, {});
+  ajouterLigneEnvoi(db, id, { asin: 'B0AAAAAAA1', quantite: 3 });
+  modifierEnvoi(db, id, { numero_envoi: 'FBA15ABC', date_envoi: '2026-10-01', statut: 'expedie' });
+  const ligne = lireEnvoi(db, id).lignes[0];
+  modifierLigneEnvoi(db, ligne.id, { quantite: '7' });
+  assert.throws(() => modifierLigneEnvoi(db, ligne.id, { quantite: '0' }), /Quantité invalide/);
+  const e = lireEnvoi(db, id);
+  assert.equal(e.numero_envoi, 'FBA15ABC');
+  assert.equal(e.date_envoi, '2026-10-01');
+  assert.equal(e.lignes[0].quantite, 7);
+  assert.equal(statistiques(db, '30j', new Date('2026-10-08T12:00:00Z')).indicateurs.unites_envoyees.courant, 7);
+});

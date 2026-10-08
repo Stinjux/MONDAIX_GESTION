@@ -60,6 +60,21 @@ export function rattacherLigneEnvoi(db, ligneId, commandeId) {
   journaliser(db, 'envoi', l.envoi_id, 'ligne_rattachee', { ligne_id: ligneId, avant: l.commande_id, apres: commandeId || null });
 }
 
+/** Modifie la quantité et/ou la commande d'origine d'une ligne d'envoi. */
+export function modifierLigneEnvoi(db, ligneId, champs) {
+  const l = db.prepare('SELECT * FROM envoi_lignes WHERE id = ?').get(ligneId);
+  if (!l) throw new ErreurMetier('Ligne introuvable.', 404);
+  transaction(db, () => {
+    if (champs.quantite !== undefined) {
+      const quantite = parserQuantite(champs.quantite);
+      if (!quantite) throw new ErreurMetier('Quantité invalide.');
+      db.prepare('UPDATE envoi_lignes SET quantite = ? WHERE id = ?').run(quantite, ligneId);
+      journaliser(db, 'envoi', l.envoi_id, 'quantite_modifiee', { ligne_id: ligneId, avant: l.quantite, apres: quantite });
+    }
+    if (champs.commande_id !== undefined) rattacherLigneEnvoi(db, ligneId, champs.commande_id ? Number(champs.commande_id) : null);
+  });
+}
+
 export function supprimerLigneEnvoi(db, ligneId) {
   const l = db.prepare('SELECT * FROM envoi_lignes WHERE id = ?').get(ligneId);
   if (!l) throw new ErreurMetier('Ligne introuvable.', 404);
