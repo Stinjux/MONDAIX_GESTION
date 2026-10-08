@@ -61,9 +61,16 @@ test('stock : photo de chaque import d’inventaire et écart avec l’import pr
   assert.deepEqual(e.parAsin.get('B0AAAAAAA1'), { quantite: 7, precedente: 10, ecart: -3, absent: false });
   assert.deepEqual(e.parAsin.get('B0AAAAAAA2'), { quantite: 0, precedente: 5, ecart: -5, absent: true });
   assert.deepEqual(e.parAsin.get('B0AAAAAAA3'), { quantite: 0, precedente: 0, ecart: 0, absent: false });
+  // Cellule vide ou illisible : 0
+  inv(db, 'asin,qty\nB0AAAAAAA1,\nB0AAAAAAA2,n/a\nB0AAAAAAA3,6\n', 'inv-3');
+  const e3 = etatStock(db);
+  assert.deepEqual([e3.parAsin.get('B0AAAAAAA1').quantite, e3.parAsin.get('B0AAAAAAA2').quantite, e3.dernier.total], [0, 0, 6]);
+  // ASIN jamais présent dans un fichier d'inventaire : 0
+  creerCommande(db, { numero_commande: 'Z', lignes: [{ asin: 'B0AAAAAAA9', quantite: 1 }] });
+  assert.equal(listerAsins(db).find((x) => x.asin === 'B0AAAAAAA9').stock.quantite, 0);
   // Un import sans colonne de quantité ne change pas le stock
   importerInventaire(db, { texte: 'asin,cost\nB0AAAAAAA1,5\n', mapping: { asin: 0, cost: 1 } });
-  assert.equal(etatStock(db).dernier.total, 7);
+  assert.equal(etatStock(db).dernier.total, 6);
 });
 
 test('statistiques par période et progression par rapport à la période précédente', () => {

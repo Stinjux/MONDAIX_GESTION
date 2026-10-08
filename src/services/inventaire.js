@@ -44,8 +44,9 @@ export function importerInventaire(db, { texte, mapping, nom }) {
       if (map.sku !== undefined && l[map.sku]) maj.sku = l[map.sku];
       if (map.titre !== undefined && l[map.titre]) maj.titre = l[map.titre];
       if (map.quantite !== undefined) {
-        const q = /^\s*0+([.,]0+)?\s*$/.test(l[map.quantite] || '') ? 0 : parserQuantite(l[map.quantite]);
-        if (q !== null) stock.set(asin, (stock.get(asin) || 0) + q);
+        // Quantité vide, nulle ou illisible : 0.
+        const q = parserQuantite(l[map.quantite]) ?? 0;
+        stock.set(asin, (stock.get(asin) || 0) + q);
       }
       const cles = Object.keys(maj);
       if (cles.length) {

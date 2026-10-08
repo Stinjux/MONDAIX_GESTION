@@ -45,7 +45,7 @@ function rendreIndicateurs(s) {
             stock: true,
             precedente: i.stock.date_import_precedent ? `l’import du ${date(i.stock.date_import_precedent)}` : null,
           })
-        : `<a class="tuile indicateur" href="#/asins"><div class="libelle">Unités en stock</div><div class="valeur">—</div><div class="variation">Importez le fichier d’inventaire (page ASIN)</div></a>`}
+        : `<a class="tuile indicateur" href="#/asins"><div class="libelle">Unités en stock</div><div class="valeur">0</div><div class="variation">Aucun import d’inventaire (page ASIN)</div></a>`}
     </div>
     <p class="aide">Du ${date(s.du)} (exclu) au ${date(s.au)}. Dépenses : prix total des commandes issu du Google Sheets${
       i.depenses.commandes_sans_total ? ` (${i.depenses.commandes_sans_total} commande(s) sans prix total : facture ou lignes utilisées)` : ''

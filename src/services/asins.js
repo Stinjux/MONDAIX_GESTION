@@ -17,6 +17,9 @@ const SQL_QUANTITES = `
   (SELECT MAX(COALESCE(c.date_commande, date(c.created_at))) FROM commande_lignes cl JOIN commandes c ON c.id = cl.commande_id
      WHERE cl.asin = p.asin) AS derniere_commande`;
 
+// ASIN jamais présent dans un import d'inventaire : stock 0.
+const STOCK_VIDE = { quantite: 0, precedente: null, ecart: null, absent: true };
+
 export function listerAsins(db) {
   const stock = etatStock(db);
   const dernierDossier = db.prepare('SELECT * FROM dossiers_autorisation WHERE asin = ? ORDER BY id DESC LIMIT 1');
@@ -37,7 +40,7 @@ export function listerAsins(db) {
       const d = dernierDossier.get(p.asin);
       return {
         ...p,
-        stock: stock.parAsin.get(p.asin) || null,
+        stock: stock.parAsin.get(p.asin) || STOCK_VIDE,
         valeur_achats_estimee: p.cout_retenu === null ? null : arrondir(p.cout_retenu * p.unites_commandees),
         autorisation: d ? { dossier_id: d.id, statut: d.statut, confirme: estConfirme(d), numero_cas: d.numero_cas } : null,
         nb_emails: nbEmails.get(p.asin, p.asin).n,
@@ -162,7 +165,7 @@ export function ficheAsin(db, asin) {
       date: String(h.date).slice(0, 10),
       type: 'stock',
       libelle: `Stock · import ${h.nom || '#' + h.import_id}`,
-      detail: `${h.quantite} unité(s)${h.absent ? ' (absent de l’import)' : ''}${h.ecart === null ? '' : ` · ${h.ecart > 0 ? '+' : h.ecart < 0 ? '−' : ''}${Math.abs(h.ecart)} depuis l’import précédent`}`,
+      detail: `${h.quantite} unité(s)${h.ecart === null ? '' : ` · ${h.ecart > 0 ? '+' : h.ecart < 0 ? '−' : ''}${Math.abs(h.ecart)} depuis l’import précédent`}`,
       lien: null,
     })),
     ...depenses.map((d) => ({ date: d.date_depense || String(d.created_at).slice(0, 10), type: 'depense', libelle: `Dépense : ${TYPES_DEPENSE[d.type]}`, detail: `${d.montant} $ pour ${d.quantite_concernee} unité(s)`, lien: '#/depenses' })),
@@ -177,7 +180,7 @@ export function ficheAsin(db, asin) {
 
   return {
     ...produit,
-    stock: etatStock(db).parAsin.get(asin) || null,
+    stock: etatStock(db).parAsin.get(asin) || STOCK_VIDE,
     historique_stock: historiqueStock,
     cout_retenu: coutRetenu(db, asin),
     cout_complet: coutComplet(db, asin),
