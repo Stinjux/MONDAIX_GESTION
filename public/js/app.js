@@ -4,6 +4,7 @@ import { pageImportSheets } from './pages/importSheets.js';
 import { pageCommandes, pageCommande } from './pages/commandes.js';
 import { pageDepenses } from './pages/produits.js';
 import { pageAsins, pageAsin } from './pages/asins.js';
+import { pageDocument } from './pages/documents.js';
 import { pageEnvois, pageEnvoi } from './pages/envois.js';
 import { pageAutorisations, pageDossier } from './pages/autorisations.js';
 import { pageEmails } from './pages/emails.js';
@@ -15,6 +16,7 @@ const ROUTES = [
   [/^commandes$/, pageCommandes],
   [/^commandes\/(\d+)$/, pageCommande],
   [/^factures$/, pageFactures],
+  [/^factures\/document\/(\d+)$/, pageDocument],
   [/^asins$/, pageAsins],
   [/^asins\/([A-Za-z0-9]+)$/, pageAsin],
   [/^produits$/, pageAsins],

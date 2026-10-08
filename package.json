@@ -13,6 +13,7 @@
     "test": "node --disable-warning=ExperimentalWarning --test"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.0",
     "imapflow": "^1.7.8"
   },
   "main": "app.cjs"

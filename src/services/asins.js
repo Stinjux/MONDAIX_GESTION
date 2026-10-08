@@ -78,7 +78,7 @@ export function ficheAsin(db, asin) {
   // Factures : lignes de facture de l'ASIN, et factures des commandes qui le contiennent.
   const factures = db
     .prepare(
-      `SELECT DISTINCT f.*, c.numero_commande FROM factures f
+      `SELECT DISTINCT f.*, c.numero_commande, (SELECT d.id FROM facture_documents d WHERE d.facture_id = f.id) AS document_id FROM factures f
        LEFT JOIN commandes c ON c.id = f.commande_id
        LEFT JOIN facture_lignes fl ON fl.facture_id = f.id AND fl.asin = ?
        LEFT JOIN commande_lignes cl ON cl.commande_id = f.commande_id AND cl.asin = ?

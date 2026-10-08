@@ -4,7 +4,7 @@ Suivi des achats fournisseurs, des coûts, des envois Amazon et des demandes d�
 
 ## Démarrage
 
-Prérequis : Node.js 22.13 ou plus récent (SQLite intégré à Node). Seule dépendance : `imapflow` (lecture IMAP).
+Prérequis : Node.js 22.13 ou plus récent (SQLite intégré à Node). Dépendances : `imapflow` (lecture IMAP) et `@anthropic-ai/sdk` (extraction des factures).
 
 ```bash
 npm install
@@ -97,6 +97,20 @@ Sources acceptées : fichier CSV/TSV exporté, copier-coller des cellules, lien 
   (domaine connu → fournisseur existant, sinon nom suggéré) et doit être validé manuellement.
 - Un réimport signale les lignes identiques déjà importées (« doublon possible ») sans les écarter silencieusement.
 
+### Factures déposées (PDF, JPEG, PNG)
+
+- Page **Factures** : déposez un ou plusieurs fichiers (glisser-déposer). Le fichier est conservé (sur le volume,
+  à côté de la base) et un même fichier n'est enregistré qu'une fois.
+- Si `ANTHROPIC_API_KEY` est définie, les données sont extraites par l'API Claude (sortie JSON contrainte) :
+  fournisseur, n° de facture, n° de commande, date, sous-total HT, taxes, livraison, total et articles.
+  Sans clé, la facture s'affiche à côté du formulaire pour une saisie manuelle.
+- Écran de vérification : aperçu du document, commande proposée (n° de commande, sinon montant), et pour chaque
+  article un **ASIN proposé** (ASIN écrit sur la facture, seul article de la commande, même quantité qu'une ligne
+  de la commande, ou titre ressemblant) — toujours modifiable. Un article = un ASIN ; un article sans ASIN n'est pas enregistré.
+- À l'enregistrement : facture créée (lignes par ASIN, coûts unitaires ajoutés à l'historique sans écraser le coût
+  retenu, livraison/taxes/autres frais en dépenses de la commande). Le document reste consultable depuis la facture,
+  la commande et la fiche ASIN.
+
 ### 4. Rapprochement
 
 - Chaîne achats : ligne Google Sheets → commande fournisseur → confirmation Gmail → facture → réception → envoi Amazon
@@ -127,6 +141,9 @@ src/
     autorisations.js     dossiers d’autorisation
     emails.js            sources Gmail / Neo, rapprochement
     synchroEmail.js      synchronisation IMAP (filtres, incrémental, lecture seule)
+    documentsFactures.js factures déposées : fichier, extraction (API Claude), propositions, validation
+    asins.js             liste et fiche ASIN (historique complet)
+    statistiques.js      indicateurs du tableau de bord par période
     tableauDeBord.js     éléments à rapprocher
 public/                  interface web (HTML/CSS/JS sans framework)
 test/                    tests node:test

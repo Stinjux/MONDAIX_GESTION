@@ -181,7 +181,7 @@ export async function pageAsin(zone, asin) {
     <h2>Factures</h2>
     ${tableau(
       ['Date', 'Facture', 'Commande', 'Lignes de cet ASIN', { t: 'Total facture', classe: 'num' }],
-      p.factures.map((f) => `<tr><td>${date(f.date_facture)}</td><td>${esc(f.numero_facture || '#' + f.id)}</td>
+      p.factures.map((f) => `<tr><td>${date(f.date_facture)}</td><td>${esc(f.numero_facture || '#' + f.id)}${f.document_id ? ` · <a href="/api/factures/documents/${f.document_id}/fichier" target="_blank" rel="noopener">document</a>` : ''}</td>
         <td>${f.commande_id ? `<a href="#/commandes/${f.commande_id}">${esc(f.numero_commande || '#' + f.commande_id)}</a>` : badge('à rattacher', 'alerte')}</td>
         <td>${f.lignes_asin.map((l) => `${l.quantite} × ${montant(l.prix_unitaire_ht)} HT`).join('<br>') || '<span class="aide">non détaillé</span>'}</td>
         <td class="num">${montant(f.total_calcule)}</td></tr>`),

@@ -18,6 +18,7 @@ import * as tdb from './services/tableauDeBord.js';
 import * as synchro from './services/synchroEmail.js';
 import * as asins from './services/asins.js';
 import * as stats from './services/statistiques.js';
+import * as documents from './services/documentsFactures.js';
 
 const DOSSIER_PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -100,6 +101,18 @@ export function creerRoutes(db) {
   r('POST', '/api/factures', ({ corps }) => commandes.creerFacture(db, corps));
   r('PUT', '/api/factures/:id/commande', ({ p, corps }) => commandes.rattacherFacture(db, +p.id, corps.commande_id ? +corps.commande_id : null));
   r('DELETE', '/api/factures/:id', ({ p }) => commandes.supprimerFacture(db, +p.id));
+
+  // Factures déposées (PDF / image) et extraction
+  r('GET', '/api/factures/documents', ({ q }) => ({
+    extraction_configuree: documents.extractionConfiguree(),
+    documents: documents.listerDocuments(db, { statut: q.get('statut') || undefined }),
+  }));
+  r('POST', '/api/factures/documents', ({ corps }) => documents.deposerDocument(db, corps));
+  r('GET', '/api/factures/documents/:id', ({ p }) => ({ ...documents.lireDocument(db, +p.id), extraction_configuree: documents.extractionConfiguree() }));
+  r('GET', '/api/factures/documents/:id/fichier', ({ p }) => ({ __fichier: documents.fichierDocument(db, +p.id) }));
+  r('POST', '/api/factures/documents/:id/extraire', ({ p }) => documents.extraireDocument(db, +p.id));
+  r('POST', '/api/factures/documents/:id/valider', ({ p, corps }) => documents.validerDocument(db, +p.id, corps));
+  r('DELETE', '/api/factures/documents/:id', ({ p }) => documents.supprimerDocument(db, +p.id));
 
   // Envois Amazon
   r('GET', '/api/envois', () => envois.listerEnvois(db));
@@ -212,7 +225,7 @@ async function lireCorps(req) {
   let taille = 0;
   for await (const m of req) {
     taille += m.length;
-    if (taille > 25 * 1024 * 1024) throw new ErreurMetier('Requête trop volumineuse.', 413);
+    if (taille > 30 * 1024 * 1024) throw new ErreurMetier('Requête trop volumineuse.', 413);
     morceaux.push(m);
   }
   const texte = Buffer.concat(morceaux).toString('utf8');
@@ -270,6 +283,16 @@ export function creerServeur(db, { acces = {} } = {}) {
         const p = Object.fromEntries(route.cles.map((c, i) => [c, decodeURIComponent(m[i + 1])]));
         const corps = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await lireCorps(req) : {};
         const resultat = await route.gestionnaire({ p, q: url.searchParams, corps, entetes: req.headers });
+        if (resultat && resultat.__fichier) {
+          const f = resultat.__fichier;
+          res.writeHead(200, {
+            'Content-Type': f.type,
+            'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(f.nom)}`,
+            'X-Content-Type-Options': 'nosniff',
+            'Cache-Control': 'private, max-age=3600',
+          });
+          return res.end(f.contenu);
+        }
         return repondre(res, 200, resultat);
       }
       repondre(res, 404, { erreur: 'Route inconnue.' });

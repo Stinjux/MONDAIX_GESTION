@@ -147,11 +147,11 @@ export async function pageCommande(zone, id) {
           <td class="num">${montant(f.taxes)}</td><td class="num">${montant(f.livraison)}</td><td class="num">${montant(f.autres_frais)}</td>
           <td class="num"><strong>${montant(f.total_calcule)}</strong></td>
           <td>${f.lignes.map((l) => `${asinLien(l.asin)} × ${l.quantite} @ ${montant(l.prix_unitaire_ht)}`).join('<br>') || '—'}</td>
-          <td><button class="petit danger" data-suppr-facture="${f.id}">Supprimer</button></td></tr>`,
+          <td class="actions">${f.document_id ? `<a class="bouton petit" href="/api/factures/documents/${f.document_id}/fichier" target="_blank" rel="noopener">Document</a>` : ''}<button class="petit danger" data-suppr-facture="${f.id}">Supprimer</button></td></tr>`,
       ),
       'Aucune facture.',
     )}
-    <button id="ajout-facture">+ Saisir la facture</button>
+    <div class="actions"><button id="ajout-facture">+ Saisir la facture</button><a class="bouton" href="#/factures">Déposer un PDF / une photo de facture</a></div>
 
     <h2>Réceptions</h2>
     ${tableau(

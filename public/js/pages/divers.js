@@ -1,5 +1,6 @@
 import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, toast, definirDomaineAmazon } from '../outils.js';
 import { rafraichir } from '../app.js';
+import { carteDepot, brancherDepot } from './documents.js';
 
 export async function pageFournisseurs(zone) {
   const fournisseurs = await api('/api/fournisseurs');
@@ -27,22 +28,25 @@ export async function pageFournisseurs(zone) {
 }
 
 export async function pageFactures(zone) {
-  const [factures, commandes] = await Promise.all([api('/api/factures'), api('/api/commandes')]);
+  const [factures, commandes, docs] = await Promise.all([api('/api/factures'), api('/api/commandes'), api('/api/factures/documents?statut=a_valider')]);
   const optionsCommandes = [['', '— aucune —'], ...commandes.map((c) => [c.id, `${c.numero_commande || '#' + c.id} · ${c.fournisseur || '?'} · ${montant(c.total_declare)}`])];
   zone.innerHTML = `
     <div class="entete"><div><h1>Factures</h1>
       <p class="aide">Une facture saisie avec un n° de commande est rattachée automatiquement si ce numéro correspond à une seule commande ; sinon, elle reste à rattacher.</p></div>
-      <button class="principal" id="nouvelle">Nouvelle facture</button></div>
+      <button id="nouvelle">Saisie manuelle</button></div>
+    ${carteDepot(docs)}
+    <h2>Factures enregistrées</h2>
     ${tableau(
       ['N°', 'Date', 'Fournisseur', 'Réf. commande', { t: 'Sous-total HT', classe: 'num' }, { t: 'Total', classe: 'num' }, 'Commande', ''],
       factures.map(
         (f) => `<tr><td>${esc(f.numero_facture || '—')}</td><td>${date(f.date_facture)}</td><td>${esc(f.fournisseur || '—')}</td><td class="mono">${esc(f.numero_commande_ref || '—')}</td>
           <td class="num">${montant(f.sous_total_ht)}</td><td class="num">${montant(f.total_calcule)}</td>
           <td>${f.commande_id ? `<a href="#/commandes/${f.commande_id}">${esc(f.numero_commande || '#' + f.commande_id)}</a>` : badge('à rattacher', 'alerte')}</td>
-          <td class="actions"><button class="petit" data-rattacher="${f.id}">Rattacher</button><button class="petit danger" data-suppr="${f.id}">Supprimer</button></td></tr>`,
+          <td class="actions">${f.document_id ? `<a class="bouton petit" href="/api/factures/documents/${f.document_id}/fichier" target="_blank" rel="noopener">Document</a>` : ''}<button class="petit" data-rattacher="${f.id}">Rattacher</button><button class="petit danger" data-suppr="${f.id}">Supprimer</button></td></tr>`,
       ),
       'Aucune facture.',
     )}`;
+  brancherDepot(zone);
   zone.querySelector('#nouvelle').onclick = async () => {
     const r = await modale({
       titre: 'Nouvelle facture',

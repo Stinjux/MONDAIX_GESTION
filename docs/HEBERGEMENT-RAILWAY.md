@@ -43,6 +43,8 @@ NEO_IMAP_HOTE=
 - `GMAIL_MOT_DE_PASSE` : **mot de passe d'application** Google (myaccount.google.com/apppasswords,
   validation en deux étapes requise), pas le mot de passe du compte.
 - `NEO_IMAP_HOTE` : serveur IMAP indiqué dans les réglages Neo.
+- `ANTHROPIC_API_KEY` (facultatif) : clé de l'API Claude pour extraire automatiquement les factures
+  déposées en PDF ou en photo. Les fichiers sont enregistrés sur le volume, dans `/app/data/factures`.
 - Ne définissez pas `PORT` ni `HOST` : Railway et le Dockerfile s'en chargent.
 
 Les filtres par défaut s'appliquent (Gmail : objet contenant « order » ou « shopping » ;

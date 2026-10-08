@@ -241,6 +241,8 @@ export function rattacherFacture(db, factureId, commandeId) {
 export function supprimerFacture(db, id) {
   const f = db.prepare('SELECT * FROM factures WHERE id = ?').get(id);
   if (!f) throw new ErreurMetier('Facture introuvable.', 404);
+  // Le document déposé (PDF / image) redevient « à valider ».
+  db.prepare("UPDATE facture_documents SET statut = 'a_valider', facture_id = NULL WHERE facture_id = ?").run(id);
   db.prepare('DELETE FROM factures WHERE id = ?').run(id);
   journaliser(db, 'facture', id, 'suppression', f);
 }
@@ -248,7 +250,9 @@ export function supprimerFacture(db, id) {
 export function listerFactures(db, { sansCommande = false } = {}) {
   return db
     .prepare(
-      `SELECT f.*, c.numero_commande, fo.nom AS fournisseur FROM factures f
+      `SELECT f.*, c.numero_commande, fo.nom AS fournisseur,
+         (SELECT d.id FROM facture_documents d WHERE d.facture_id = f.id) AS document_id
+       FROM factures f
        LEFT JOIN commandes c ON c.id = f.commande_id
        LEFT JOIN fournisseurs fo ON fo.id = f.fournisseur_id
        ${sansCommande ? 'WHERE f.commande_id IS NULL' : ''}
@@ -370,7 +374,10 @@ export function lireCommande(db, id) {
   const lignesImport = db.prepare('SELECT * FROM lignes_import WHERE commande_id = ? ORDER BY import_id, numero_ligne').all(id);
   const emails = db.prepare('SELECT id, expediteur, sujet, date_reception, mode_rapprochement, references_extraites FROM emails WHERE commande_id = ?').all(id)
     .map((e) => ({ ...e, references_extraites: JSON.parse(e.references_extraites) }));
-  const factures = db.prepare('SELECT * FROM factures WHERE commande_id = ? ORDER BY id').all(id).map((f) => ({
+  const factures = db
+    .prepare('SELECT f.*, (SELECT d.id FROM facture_documents d WHERE d.facture_id = f.id) AS document_id FROM factures f WHERE f.commande_id = ? ORDER BY f.id')
+    .all(id)
+    .map((f) => ({
     ...f,
     total_calcule: totalFacture(f),
     lignes: db.prepare('SELECT * FROM facture_lignes WHERE facture_id = ?').all(f.id),

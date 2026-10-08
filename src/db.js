@@ -152,6 +152,21 @@ CREATE TABLE IF NOT EXISTS emails (
   CHECK (source = 'neo' OR dossier_id IS NULL)
 );
 
+-- Factures déposées (PDF / image) : fichier, données extraites, validation.
+CREATE TABLE IF NOT EXISTS facture_documents (
+  id INTEGER PRIMARY KEY,
+  facture_id INTEGER REFERENCES factures(id) ON DELETE SET NULL,
+  nom_fichier TEXT NOT NULL,
+  type_mime TEXT NOT NULL,
+  taille INTEGER NOT NULL,
+  chemin TEXT NOT NULL,
+  empreinte TEXT NOT NULL UNIQUE,              -- SHA-256 : un même fichier n'est enregistré qu'une fois
+  statut TEXT NOT NULL DEFAULT 'a_valider' CHECK (statut IN ('a_valider', 'valide')),
+  extraction TEXT,                             -- JSON renvoyé par l'extraction
+  erreur_extraction TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Photo du stock à chaque import du fichier d'inventaire (quantité par ASIN).
 CREATE TABLE IF NOT EXISTS stock_releves (
   id INTEGER PRIMARY KEY,

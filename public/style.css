@@ -130,6 +130,16 @@ dialog h2 { margin-top: 0; }
 .tuile.indicateur .libelle { font-size: 12.5px; }
 .tuile.indicateur .valeur { margin: 2px 0; }
 .variation { font-size: 12px; color: var(--doux); font-variant-numeric: tabular-nums; }
+.depot { display: flex; align-items: center; justify-content: center; gap: 10px; border: 2px dashed var(--bord); border-radius: 10px; padding: 22px; cursor: pointer; color: var(--doux); background: var(--fond); }
+.depot.survol, .depot:hover { border-color: var(--accent); color: var(--accent); }
+.depot input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.verif-facture { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 14px; align-items: start; }
+.verif-facture .apercu { position: sticky; top: 60px; }
+.verif-facture iframe { width: 100%; height: 78vh; border: 1px solid var(--bord); border-radius: 8px; background: #fff; }
+.verif-facture img { width: 100%; border: 1px solid var(--bord); border-radius: 8px; }
+.verif-facture td input { width: 100%; }
+.verif-facture td input[name=description] { min-width: 200px; }
+@media (max-width: 1000px) { .verif-facture { grid-template-columns: 1fr; } .verif-facture .apercu { position: static; } .verif-facture iframe { height: 60vh; } }
 .vide { color: var(--doux); padding: 14px; text-align: center; }
 .deux-colonnes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 pre.corps { white-space: pre-wrap; background: var(--neutre-doux); padding: 10px; border-radius: 6px; max-height: 300px; overflow: auto; font-size: 12.5px; }
