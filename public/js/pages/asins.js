@@ -17,7 +17,7 @@ export async function pageAsins(zone) {
   const asinsEcart = new Set(ecarts.map((e) => e.asin));
   const filtres = {
     '': ['Tous', () => true],
-    stock: ['En stock', (p) => p.stock > 0],
+    stock: ['En stock', (p) => p.stock?.quantite > 0],
     ecarts: ['Écarts de coût', (p) => asinsEcart.has(p.asin)],
     sans_cout: ['Sans coût d’achat', (p) => p.cout_retenu === null],
     autorisation: ['Autorisation non confirmée', (p) => !p.autorisation?.confirme],
@@ -55,7 +55,7 @@ export async function pageAsins(zone) {
           <td>${esc(p.titre || '')}${p.sku ? `<div class="aide" style="margin:0">SKU ${esc(p.sku)}</div>` : ''}</td>
           <td class="num">${montant(p.cout_retenu)}${asinsEcart.has(p.asin) ? '<br>' + badge('écart', 'alerte') : ''}</td>
           <td class="num">${p.unites_commandees}</td><td class="num">${p.unites_recues}</td><td class="num">${p.unites_envoyees}</td>
-          <td class="num"><strong>${p.stock}</strong></td>
+          <td class="num">${celluleStock(p.stock)}</td>
           <td class="num">${montant(p.valeur_achats_estimee)}</td>
           <td>${a ? `<a href="#/dossiers/${a.dossier_id}">${badge(refs.statuts_dossier[a.statut] + (a.confirme ? ' ✓' : ''), TONS_DOSSIER[a.statut])}</a>` : badge('aucun dossier')}</td>
           <td>${date(p.derniere_commande)}</td>
@@ -63,12 +63,23 @@ export async function pageAsins(zone) {
       }),
       'Aucun ASIN.',
     )}
-    <p class="aide">Valeur achats (est.) = coût d’achat HT retenu × unités commandées. Le stock correspond aux unités reçues moins les unités expédiées à Amazon.</p>
+    <p class="aide">Valeur achats (est.) = coût d’achat HT retenu × unités commandées. Stock : quantité du dernier import du fichier d’inventaire, avec l’écart depuis l’import précédent.</p>
     <details class="carte"><summary><strong>Importer le fichier d’inventaire</strong> (colonne cost = coût d’achat unitaire HT)</summary>
       <div id="inventaire" style="margin-top:10px">${rendreInventaire()}</div></details>`;
 
   zone.querySelector('#recherche-asin').onchange = (e) => ((etat.recherche = e.target.value), rafraichir());
   brancherInventaire(zone);
+}
+
+function ecartTexte(ecart) {
+  if (ecart === null || ecart === undefined) return '';
+  if (ecart === 0) return '= 0';
+  return `${ecart > 0 ? '▲ +' : '▼ −'}${Math.abs(ecart)}`;
+}
+
+function celluleStock(s) {
+  if (!s) return '<span class="aide">—</span>';
+  return `<strong>${s.quantite}</strong>${s.ecart !== null && s.ecart !== 0 ? `<div class="variation">${ecartTexte(s.ecart)}</div>` : ''}`;
 }
 
 /* ------------------------------------------------------------------ fiche */
@@ -84,6 +95,7 @@ const TYPES_EVENEMENT = {
   email_neo: ['Neo', ''],
   depense: ['Dépense', ''],
   sheets: ['Google Sheets', ''],
+  stock: ['Stock', ''],
 };
 
 function tuile(valeur, libelle) {
@@ -109,7 +121,7 @@ export async function pageAsin(zone, asin) {
       ${tuile(p.unites_commandees, `Unités commandées (${p.commandes.length} commande(s))`)}
       ${tuile(p.unites_recues, 'Unités reçues')}
       ${tuile(p.unites_envoyees, 'Unités expédiées à Amazon')}
-      ${tuile(p.stock, 'Unités en stock')}
+      ${tuile(p.stock ? `${p.stock.quantite}${p.stock.ecart ? ` <span class="variation">${ecartTexte(p.stock.ecart)}</span>` : ''}` : '—', p.stock ? 'Unités en stock (dernier import)' : 'Stock : aucun import d’inventaire')}
     </div>
 
     <div class="deux-colonnes" style="margin-top:14px">
@@ -139,6 +151,11 @@ export async function pageAsin(zone, asin) {
       }),
       'Aucun événement.',
     )}
+
+    ${p.historique_stock.length ? `<h2>Stock (imports du fichier d’inventaire)</h2>
+    ${tableau(['Import', 'Date', { t: 'Quantité', classe: 'num' }, { t: 'Écart avec l’import précédent', classe: 'num' }],
+      p.historique_stock.map((h) => `<tr><td>${esc(h.nom || '#' + h.import_id)}</td><td>${date(h.date)}</td>
+        <td class="num">${h.quantite}${h.absent ? ' ' + badge('absent du fichier') : ''}</td><td class="num">${ecartTexte(h.ecart) || '—'}</td></tr>`))}` : ''}
 
     <h2>Coûts d’achat unitaires HT</h2>
     <p class="aide">Aucune valeur n’est écrasée. Choisissez la valeur à retenir en cas d’écart.</p>

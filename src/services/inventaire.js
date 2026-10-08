@@ -1,6 +1,6 @@
 // Import du fichier d'inventaire. La colonne « cost » = prix d'achat unitaire HT
 // (sans livraison, préparation ni transport vers Amazon).
-import { ErreurMetier, assurerProduit, journaliser, transaction } from '../db.js';
+import { ErreurMetier, assurerProduit, journaliser, lireParametre, transaction } from '../db.js';
 import { lireTableau } from '../lib/csv.js';
 import { CHAMPS_INVENTAIRE, proposerMapping, validerMapping } from '../lib/mapping.js';
 import { normaliserAsin, parserMontant, parserQuantite } from '../lib/parse.js';
@@ -32,6 +32,7 @@ export function importerInventaire(db, { texte, mapping, nom }) {
       .run(nom || 'inventaire', JSON.stringify(map), JSON.stringify(entetes), lignes.length);
     const importId = Number(imp.lastInsertRowid);
     const resultat = { import_id: importId, produits: 0, couts_ajoutes: 0, ecarts: [], rejets: [] };
+    const stock = new Map(); // ASIN → quantité (plusieurs SKU d'un même ASIN sont additionnés)
     lignes.forEach((l, i) => {
       const asin = normaliserAsin(l[map.asin]);
       if (!asin) {
@@ -43,8 +44,8 @@ export function importerInventaire(db, { texte, mapping, nom }) {
       if (map.sku !== undefined && l[map.sku]) maj.sku = l[map.sku];
       if (map.titre !== undefined && l[map.titre]) maj.titre = l[map.titre];
       if (map.quantite !== undefined) {
-        const q = l[map.quantite] === '0' ? 0 : parserQuantite(l[map.quantite]);
-        if (q !== null) maj.quantite_inventaire = q;
+        const q = /^\s*0+([.,]0+)?\s*$/.test(l[map.quantite] || '') ? 0 : parserQuantite(l[map.quantite]);
+        if (q !== null) stock.set(asin, (stock.get(asin) || 0) + q);
       }
       const cles = Object.keys(maj);
       if (cles.length) {
@@ -67,7 +68,77 @@ export function importerInventaire(db, { texte, mapping, nom }) {
         }
       }
     });
-    journaliser(db, 'import', importId, 'inventaire', { produits: resultat.produits, ecarts: resultat.ecarts.length });
+    // Photo du stock de cet import
+    const releve = db.prepare('INSERT INTO stock_releves (import_id, asin, quantite) VALUES (?, ?, ?)');
+    for (const [asin, q] of stock) {
+      releve.run(importId, asin, q);
+      db.prepare("UPDATE produits SET quantite_inventaire = ?, updated_at = datetime('now') WHERE asin = ?").run(q, asin);
+    }
+    if (stock.size) {
+      const e = etatStock(db);
+      resultat.stock = { total: e.dernier.total, precedent: e.precedent?.total ?? null, ecart: e.precedent ? e.dernier.total - e.precedent.total : null };
+    }
+    journaliser(db, 'import', importId, 'inventaire', { produits: resultat.produits, ecarts: resultat.ecarts.length, stock: resultat.stock || null });
     return resultat;
+  });
+}
+
+/* ------------------------------------------------------------------ stock */
+
+/** Imports d'inventaire contenant des quantités, du plus récent au plus ancien. */
+export function importsStock(db) {
+  return db
+    .prepare(
+      `SELECT i.id AS import_id, i.nom, i.created_at AS date, SUM(s.quantite) AS total, COUNT(s.id) AS nb_asin
+       FROM imports i JOIN stock_releves s ON s.import_id = i.id
+       WHERE i.type = 'inventaire' GROUP BY i.id ORDER BY i.id DESC`,
+    )
+    .all();
+}
+
+/**
+ * Stock = quantités du dernier import d'inventaire ; écart avec l'import précédent.
+ * Un ASIN absent d'un import compte pour 0 dans cet import.
+ */
+export function etatStock(db) {
+  const [dernier, precedent] = importsStock(db);
+  const parAsin = new Map();
+  if (!dernier) return { dernier: null, precedent: null, parAsin };
+  const qte = (importId) => new Map(db.prepare('SELECT asin, quantite FROM stock_releves WHERE import_id = ?').all(importId).map((r) => [r.asin, r.quantite]));
+  const actuel = qte(dernier.import_id);
+  const avant = precedent ? qte(precedent.import_id) : new Map();
+  for (const asin of new Set([...actuel.keys(), ...avant.keys()])) {
+    const q = actuel.get(asin) ?? 0;
+    const p = precedent ? avant.get(asin) ?? 0 : null;
+    parAsin.set(asin, { quantite: q, precedente: p, ecart: p === null ? null : q - p, absent: !actuel.has(asin) });
+  }
+  return { dernier, precedent: precedent || null, parAsin };
+}
+
+/** Évolution du stock d'un ASIN, import par import. */
+export function historiqueStockAsin(db, asin) {
+  const imports = importsStock(db).reverse();
+  const lignes = [];
+  let precedente = null;
+  for (const i of imports) {
+    const r = db.prepare('SELECT quantite FROM stock_releves WHERE import_id = ? AND asin = ?').get(i.import_id, asin);
+    const q = r ? r.quantite : 0;
+    lignes.push({ import_id: i.import_id, nom: i.nom, date: i.date, quantite: q, absent: !r, ecart: precedente === null ? null : q - precedente });
+    precedente = q;
+  }
+  return lignes.reverse();
+}
+
+/** Rattrapage unique : photo du stock à partir des quantités déjà importées. */
+export function migrerRelevesStock(db) {
+  if (lireParametre(db, 'migration.stock_releves') === '1') return;
+  transaction(db, () => {
+    const dejaFait = db.prepare('SELECT 1 FROM stock_releves LIMIT 1').get();
+    const dernier = db.prepare("SELECT id FROM imports WHERE type = 'inventaire' ORDER BY id DESC LIMIT 1").get();
+    if (!dejaFait && dernier) {
+      const ins = db.prepare('INSERT OR IGNORE INTO stock_releves (import_id, asin, quantite) VALUES (?, ?, ?)');
+      for (const p of db.prepare('SELECT asin, quantite_inventaire FROM produits WHERE quantite_inventaire IS NOT NULL').all()) ins.run(dernier.id, p.asin, p.quantite_inventaire);
+    }
+    db.prepare("INSERT INTO parametres (cle, valeur) VALUES ('migration.stock_releves', '1') ON CONFLICT(cle) DO UPDATE SET valeur = '1'").run();
   });
 }

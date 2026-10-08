@@ -37,7 +37,8 @@ export function brancherInventaire(zone) {
   zone.querySelector('#importer-inv').onclick = async () => {
     const r = await tenter(() => post('/api/imports/inventaire', { texte: etatInv.texte, mapping: etatInv.analyse.mapping, nom: etatInv.nom }));
     if (!r) return;
-    toast(`${r.produits} ASIN mis à jour, ${r.couts_ajoutes} coût(s) ajouté(s), ${r.ecarts.length} écart(s), ${r.rejets.length} rejet(s).`);
+    const st = r.stock ? ` Stock : ${r.stock.total} unité(s)${r.stock.ecart === null ? '' : ` (${r.stock.ecart >= 0 ? '+' : '−'}${Math.abs(r.stock.ecart)} depuis l’import précédent)`}.` : '';
+    toast(`${r.produits} ASIN mis à jour, ${r.couts_ajoutes} coût(s) ajouté(s), ${r.ecarts.length} écart(s), ${r.rejets.length} rejet(s).${st}`);
     etatInv.analyse = null;
     rafraichir();
   };

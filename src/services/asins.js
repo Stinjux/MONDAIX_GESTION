@@ -6,6 +6,7 @@ import { STATUTS_ENVOI } from './envois.js';
 import { totalFacture } from './commandes.js';
 import { coutComplet, coutRetenu, historiqueCouts, LIBELLES_SOURCE_COUT, TYPES_DEPENSE } from './couts.js';
 import { emailsPourAsin } from './emails.js';
+import { etatStock, historiqueStockAsin } from './inventaire.js';
 
 const SQL_QUANTITES = `
   (SELECT COALESCE(SUM(cl.quantite), 0) FROM commande_lignes cl WHERE cl.asin = p.asin) AS unites_commandees,
@@ -17,6 +18,7 @@ const SQL_QUANTITES = `
      WHERE cl.asin = p.asin) AS derniere_commande`;
 
 export function listerAsins(db) {
+  const stock = etatStock(db);
   const dernierDossier = db.prepare('SELECT * FROM dossiers_autorisation WHERE asin = ? ORDER BY id DESC LIMIT 1');
   const nbEmails = db.prepare(
     `SELECT COUNT(DISTINCT e.id) AS n FROM emails e
@@ -35,7 +37,7 @@ export function listerAsins(db) {
       const d = dernierDossier.get(p.asin);
       return {
         ...p,
-        stock: p.unites_recues - p.unites_envoyees,
+        stock: stock.parAsin.get(p.asin) || null,
         valeur_achats_estimee: p.cout_retenu === null ? null : arrondir(p.cout_retenu * p.unites_commandees),
         autorisation: d ? { dossier_id: d.id, statut: d.statut, confirme: estConfirme(d), numero_cas: d.numero_cas } : null,
         nb_emails: nbEmails.get(p.asin, p.asin).n,
@@ -113,6 +115,7 @@ export function ficheAsin(db, asin) {
     .all(asin);
   const depenses = db.prepare('SELECT * FROM depenses WHERE asin = ? ORDER BY COALESCE(date_depense, date(created_at)) DESC').all(asin);
   const historique = historiqueCouts(db, asin);
+  const historiqueStock = historiqueStockAsin(db, asin);
 
   // Chronologie unifiée
   const evenements = [
@@ -155,6 +158,13 @@ export function ficheAsin(db, asin) {
       detail: `${e.expediteur || ''} · ${e.via}`,
       lien: `#/emails/${e.source}?email=${e.id}`,
     })),
+    ...historiqueStock.map((h) => ({
+      date: String(h.date).slice(0, 10),
+      type: 'stock',
+      libelle: `Stock · import ${h.nom || '#' + h.import_id}`,
+      detail: `${h.quantite} unité(s)${h.absent ? ' (absent de l’import)' : ''}${h.ecart === null ? '' : ` · ${h.ecart > 0 ? '+' : h.ecart < 0 ? '−' : ''}${Math.abs(h.ecart)} depuis l’import précédent`}`,
+      lien: null,
+    })),
     ...depenses.map((d) => ({ date: d.date_depense || String(d.created_at).slice(0, 10), type: 'depense', libelle: `Dépense : ${TYPES_DEPENSE[d.type]}`, detail: `${d.montant} $ pour ${d.quantite_concernee} unité(s)`, lien: '#/depenses' })),
     ...lignesSheets.map((l) => ({
       date: l.date_commande || null,
@@ -167,7 +177,8 @@ export function ficheAsin(db, asin) {
 
   return {
     ...produit,
-    stock: produit.unites_recues - produit.unites_envoyees,
+    stock: etatStock(db).parAsin.get(asin) || null,
+    historique_stock: historiqueStock,
     cout_retenu: coutRetenu(db, asin),
     cout_complet: coutComplet(db, asin),
     historique_couts: historique,

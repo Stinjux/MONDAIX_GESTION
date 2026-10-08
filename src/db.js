@@ -152,6 +152,15 @@ CREATE TABLE IF NOT EXISTS emails (
   CHECK (source = 'neo' OR dossier_id IS NULL)
 );
 
+-- Photo du stock à chaque import du fichier d'inventaire (quantité par ASIN).
+CREATE TABLE IF NOT EXISTS stock_releves (
+  id INTEGER PRIMARY KEY,
+  import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+  asin TEXT NOT NULL REFERENCES produits(asin),
+  quantite INTEGER NOT NULL,
+  UNIQUE (import_id, asin)
+);
+
 -- Liens libres entre un email (Gmail ou Neo) et un ASIN ou un numéro de cas Amazon.
 CREATE TABLE IF NOT EXISTS email_liens (
   id INTEGER PRIMARY KEY,

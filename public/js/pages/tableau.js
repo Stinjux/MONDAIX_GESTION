@@ -17,6 +17,7 @@ const nombre = new Intl.NumberFormat('fr-CA');
 /** Variation par rapport à la période précédente : flèche + signe + texte (jamais la couleur seule). */
 function variation(v, { argent = false, stock = false, precedente }) {
   const fmt = (x) => (argent ? montant(x) : nombre.format(x));
+  if (stock && !precedente) return '<div class="variation">Premier import : pas encore de comparaison</div>';
   if (v.ecart === 0) return `<div class="variation">= stable ${stock ? `depuis ${precedente}` : `vs ${precedente}`} (${fmt(v.precedent)})</div>`;
   const fleche = v.ecart > 0 ? '▲' : '▼';
   const signe = v.ecart > 0 ? '+' : '−';
@@ -33,18 +34,22 @@ function rendreIndicateurs(s) {
   const i = s.indicateurs;
   const jours = { '7j': '7', '30j': '30', '90j': '90', '365j': '365' }[s.periode];
   const precedente = `les ${jours} jours précédents`;
-  const ilYa = `il y a ${jours} jours`;
   return `<div class="grille">
       ${indicateur(montant(i.depenses.courant), 'Dépensé en commandes', i.depenses, { argent: true, precedente })}
       ${indicateur(nombre.format(i.commandes.courant), 'Commandes passées', i.commandes, { precedente })}
       ${indicateur(nombre.format(i.unites_commandees.courant), 'Unités commandées', i.unites_commandees, { precedente })}
       ${indicateur(nombre.format(i.envois.courant), 'Envois Amazon expédiés', i.envois, { precedente })}
       ${indicateur(nombre.format(i.unites_envoyees.courant), 'Unités envoyées à Amazon', i.unites_envoyees, { precedente })}
-      ${indicateur(nombre.format(i.stock.courant), 'Unités en stock (aujourd’hui)', i.stock, { stock: true, precedente: ilYa })}
+      ${i.stock
+        ? indicateur(nombre.format(i.stock.courant), `Unités en stock (import du ${date(i.stock.date_import)})`, i.stock, {
+            stock: true,
+            precedente: i.stock.date_import_precedent ? `l’import du ${date(i.stock.date_import_precedent)}` : null,
+          })
+        : `<a class="tuile indicateur" href="#/asins"><div class="libelle">Unités en stock</div><div class="valeur">—</div><div class="variation">Importez le fichier d’inventaire (page ASIN)</div></a>`}
     </div>
-    <p class="aide">Du ${date(s.du)} (exclu) au ${date(s.au)}. Dépenses : total des factures, ou total déclaré si la facture manque${
-      i.depenses.commandes_sans_facture ? ` (${i.depenses.commandes_sans_facture} commande(s) sans facture sur la période)` : ''
-    }. Stock : unités reçues moins unités expédiées à Amazon.</p>`;
+    <p class="aide">Du ${date(s.du)} (exclu) au ${date(s.au)}. Dépenses : prix total des commandes issu du Google Sheets${
+      i.depenses.commandes_sans_total ? ` (${i.depenses.commandes_sans_total} commande(s) sans prix total : facture ou lignes utilisées)` : ''
+    }. Stock : dernier import du fichier d’inventaire, comparé à l’import précédent (indépendant de la période).</p>`;
 }
 
 export async function pageTableauDeBord(zone) {

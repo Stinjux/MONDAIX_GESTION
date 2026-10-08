@@ -7,6 +7,9 @@ import { creerEnvoi } from '../src/services/envois.js';
 import { creerDossier } from '../src/services/autorisations.js';
 import { statistiques, montantCommande } from '../src/services/statistiques.js';
 import { listerAsins, ficheAsin } from '../src/services/asins.js';
+import { importerInventaire, etatStock } from '../src/services/inventaire.js';
+
+const inv = (db, texte, nom) => importerInventaire(db, { texte, mapping: { asin: 0, quantite: 1 }, nom });
 
 let db;
 beforeEach(() => {
@@ -43,10 +46,24 @@ test('rattrapage des liens pour les emails existants, exécuté une seule fois',
   assert.equal(migrerLiensEmails(db), 0, 'déjà fait : un lien retiré par l’utilisateur n’est pas recréé');
 });
 
-test('montant d’une commande : facture, sinon total déclaré, sinon lignes — jamais additionnés', () => {
-  assert.equal(montantCommande({ total_declare: 100 }, [{ total: 120 }], []).montant, 120);
-  assert.equal(montantCommande({ total_declare: 100 }, [], [{ quantite: 2, cout_unitaire_ht: 10 }]).montant, 100);
+test('montant d’une commande : prix total du Google Sheets, sinon facture, sinon lignes — jamais additionnés', () => {
+  assert.equal(montantCommande({ total_declare: 100 }, [{ total: 120 }], []).montant, 100);
+  assert.equal(montantCommande({ total_declare: null }, [{ total: 120 }], []).montant, 120);
   assert.equal(montantCommande({ total_declare: null }, [], [{ quantite: 2, cout_unitaire_ht: 10 }]).montant, 20);
+});
+
+test('stock : photo de chaque import d’inventaire et écart avec l’import précédent', () => {
+  const r1 = inv(db, 'asin,qty\nB0AAAAAAA1,10\nB0AAAAAAA2,4\nB0AAAAAAA2,1\n', 'inv-1');
+  assert.deepEqual(r1.stock, { total: 15, precedent: null, ecart: null }, 'deux SKU du même ASIN additionnés');
+  const r2 = inv(db, 'asin,qty\nB0AAAAAAA1,7\nB0AAAAAAA3,0\n', 'inv-2');
+  assert.deepEqual(r2.stock, { total: 7, precedent: 15, ecart: -8 });
+  const e = etatStock(db);
+  assert.deepEqual(e.parAsin.get('B0AAAAAAA1'), { quantite: 7, precedente: 10, ecart: -3, absent: false });
+  assert.deepEqual(e.parAsin.get('B0AAAAAAA2'), { quantite: 0, precedente: 5, ecart: -5, absent: true });
+  assert.deepEqual(e.parAsin.get('B0AAAAAAA3'), { quantite: 0, precedente: 0, ecart: 0, absent: false });
+  // Un import sans colonne de quantité ne change pas le stock
+  importerInventaire(db, { texte: 'asin,cost\nB0AAAAAAA1,5\n', mapping: { asin: 0, cost: 1 } });
+  assert.equal(etatStock(db).dernier.total, 7);
 });
 
 test('statistiques par période et progression par rapport à la période précédente', () => {
@@ -56,16 +73,19 @@ test('statistiques par période et progression par rapport à la période préc�
   creerCommande(db, { numero_commande: 'B', date_commande: '2026-09-28', total_declare: 50, lignes: [{ asin: 'B0AAAAAAA1', quantite: 2 }] });
   creerReception(db, c1, { date_reception: '2026-10-06' });
   creerEnvoi(db, { numero_envoi: 'FBA1', date_envoi: '2026-10-07', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 3, commande_id: c1 }] });
+  assert.equal(statistiques(db, '7j', maintenant).indicateurs.stock, null, 'pas de stock sans import d’inventaire');
+  inv(db, 'asin,qty\nB0AAAAAAA1,10\n', 'inv-1');
+  inv(db, 'asin,qty\nB0AAAAAAA1,12\n', 'inv-2');
   creerEnvoi(db, { numero_envoi: 'FBA2', date_envoi: '2026-10-07', statut: 'en_preparation', lignes: [{ asin: 'B0AAAAAAA1', quantite: 1 }] });
 
   const s7 = statistiques(db, '7j', maintenant).indicateurs;
-  assert.deepEqual([s7.depenses.courant, s7.depenses.precedent, s7.depenses.pourcentage], [110, 50, 120]);
+  assert.deepEqual([s7.depenses.courant, s7.depenses.precedent, s7.depenses.pourcentage], [100, 50, 100], 'prix total du Sheets, pas la facture');
   assert.deepEqual([s7.unites_commandees.courant, s7.unites_commandees.precedent], [4, 2]);
   assert.deepEqual([s7.envois.courant, s7.unites_envoyees.courant], [1, 3], 'envoi en préparation exclu');
-  assert.deepEqual([s7.stock.courant, s7.stock.precedent, s7.stock.ecart], [1, 0, 1], '4 reçues − 3 expédiées');
+  assert.deepEqual([s7.stock.courant, s7.stock.precedent, s7.stock.ecart], [12, 10, 2], 'dernier import vs import précédent');
 
   const s30 = statistiques(db, '30j', maintenant).indicateurs;
-  assert.deepEqual([s30.depenses.courant, s30.depenses.precedent, s30.depenses.pourcentage], [160, 0, null]);
+  assert.deepEqual([s30.depenses.courant, s30.depenses.precedent, s30.depenses.pourcentage], [150, 0, null]);
 });
 
 test('fiche ASIN : chiffres clés et chronologie complète', () => {
@@ -76,17 +96,22 @@ test('fiche ASIN : chiffres clés et chronologie complète', () => {
   creerDossier(db, { asin: 'B0AAAAAAA1', numero_cas: '11122233344', date_demande: '2026-09-01' });
   ingererEmail(db, 'neo', { sujet: 'Brand approval', corps: 'Case ID: 11122233344', date: '2026-09-03T00:00:00Z' });
 
+  inv(db, 'asin,qty\nB0AAAAAAA1,5\n', 'inv-1');
+  inv(db, 'asin,qty\nB0AAAAAAA1,3\n', 'inv-2');
   const [ligne] = listerAsins(db);
   assert.equal(ligne.asin, 'B0AAAAAAA1');
-  assert.deepEqual([ligne.unites_commandees, ligne.unites_recues, ligne.unites_envoyees, ligne.stock], [3, 3, 2, 1]);
+  assert.deepEqual([ligne.unites_commandees, ligne.unites_recues, ligne.unites_envoyees], [3, 3, 2]);
+  assert.deepEqual([ligne.stock.quantite, ligne.stock.ecart], [3, -2], 'stock du dernier import et écart');
   assert.equal(ligne.valeur_achats_estimee, 27);
   assert.equal(ligne.autorisation.numero_cas, '11122233344');
 
   const f = ficheAsin(db, 'B0AAAAAAA1');
   const types = new Set(f.evenements.map((e) => e.type));
-  for (const t of ['commande', 'facture', 'reception', 'envoi', 'cout', 'autorisation', 'email_neo']) assert.ok(types.has(t), `événement ${t}`);
+  for (const t of ['commande', 'facture', 'reception', 'envoi', 'cout', 'autorisation', 'email_neo', 'stock']) assert.ok(types.has(t), `événement ${t}`);
+  assert.deepEqual(f.historique_stock.map((h) => [h.quantite, h.ecart]), [[3, -2], [5, null]]);
   assert.equal(f.factures[0].lignes_asin[0].prix_unitaire_ht, 9);
   assert.equal(f.cout_complet.par_unite.achat, 9);
-  assert.equal(f.evenements[0].type, 'envoi', 'chronologie triée du plus récent au plus ancien');
+  const dates = f.evenements.map((e) => e.date || '');
+  assert.deepEqual(dates, [...dates].sort().reverse(), 'chronologie triée du plus récent au plus ancien');
   assert.throws(() => ficheAsin(db, 'B0ZZZZZZZZ'), /ASIN inconnu/);
 });

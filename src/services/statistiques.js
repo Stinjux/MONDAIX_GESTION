@@ -1,6 +1,7 @@
 // Indicateurs du tableau de bord par période glissante, comparés à la période précédente.
 import { arrondir } from '../lib/parse.js';
 import { totalFacture } from './commandes.js';
+import { etatStock } from './inventaire.js';
 
 export const PERIODES = {
   '7j': { jours: 7, libelle: '7 derniers jours' },
@@ -18,13 +19,14 @@ function decaler(date, jours) {
 }
 
 /**
- * Montant d'une commande, sans double comptage : total des factures s'il y en a,
- * sinon total déclaré, sinon somme des lignes dont le coût unitaire est connu.
+ * Montant d'une commande, sans double comptage : le prix total venant du Google Sheets
+ * (total déclaré) fait foi ; à défaut, le total des factures, sinon la somme des lignes
+ * dont le coût unitaire est connu.
  */
 export function montantCommande(commande, factures, lignes) {
+  if (commande.total_declare !== null && commande.total_declare !== undefined) return { montant: commande.total_declare, base: 'total_declare' };
   const totaux = factures.map(totalFacture).filter((t) => t !== null);
   if (totaux.length) return { montant: arrondir(totaux.reduce((s, t) => s + t, 0)), base: 'facture' };
-  if (commande.total_declare !== null && commande.total_declare !== undefined) return { montant: commande.total_declare, base: 'total_declare' };
   const connues = lignes.filter((l) => l.cout_unitaire_ht !== null);
   if (connues.length) return { montant: arrondir(connues.reduce((s, l) => s + l.cout_unitaire_ht * l.quantite, 0)), base: 'lignes' };
   return { montant: 0, base: 'inconnu' };
@@ -57,7 +59,7 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
     agr[cle].depenses += m.montant;
     agr[cle].unites += lignes.reduce((s, l) => s + l.quantite, 0);
     agr[cle].commandes++;
-    if (m.base !== 'facture') agr[cle].estimees++;
+    if (m.base !== 'total_declare') agr[cle].estimees++;
   }
 
   // Envois Amazon expédiés (ceux encore en préparation ne comptent pas)
@@ -76,22 +78,15 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
     env[cle].unites += e.unites;
   }
 
-  // Stock chez vous = unités reçues − unités expédiées à Amazon, à une date donnée
-  const stockAu = (jour) => {
-    const recues = db
-      .prepare(
-        `SELECT COALESCE(SUM(rl.quantite), 0) AS q FROM reception_lignes rl JOIN receptions r ON r.id = rl.reception_id
-         WHERE COALESCE(r.date_reception, date(r.created_at)) <= ?`,
-      )
-      .get(jour).q;
-    const envoyees = db
-      .prepare(
-        `SELECT COALESCE(SUM(el.quantite), 0) AS q FROM envoi_lignes el JOIN envois e ON e.id = el.envoi_id
-         WHERE e.statut <> 'en_preparation' AND COALESCE(e.date_envoi, date(e.created_at)) <= ?`,
-      )
-      .get(jour).q;
-    return recues - envoyees;
-  };
+  // Stock : dernier import du fichier d'inventaire, comparé à l'import précédent
+  const st = etatStock(db);
+  const stock = st.dernier
+    ? {
+        ...variation(st.dernier.total, st.precedent ? st.precedent.total : st.dernier.total),
+        date_import: st.dernier.date,
+        date_import_precedent: st.precedent?.date ?? null,
+      }
+    : null;
 
   return {
     periode,
@@ -99,12 +94,12 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
     du: debut,
     au: fin,
     indicateurs: {
-      depenses: { ...variation(arrondir(agr.courant.depenses), arrondir(agr.precedent.depenses)), commandes_sans_facture: agr.courant.estimees },
+      depenses: { ...variation(arrondir(agr.courant.depenses), arrondir(agr.precedent.depenses)), commandes_sans_total: agr.courant.estimees },
       commandes: variation(agr.courant.commandes, agr.precedent.commandes),
       unites_commandees: variation(agr.courant.unites, agr.precedent.unites),
       envois: variation(env.courant.envois, env.precedent.envois),
       unites_envoyees: variation(env.courant.unites, env.precedent.unites),
-      stock: variation(stockAu(fin), stockAu(debut)),
+      stock,
     },
   };
 }
