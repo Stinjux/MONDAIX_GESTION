@@ -70,13 +70,13 @@ export async function pageTableauDeBord(zone) {
 
     <h2>À rapprocher</h2>
     <p class="aide">Chaîne achats : Ligne Google Sheets → commande → confirmation Gmail → facture → réception → envoi Amazon.
-      Chaîne autorisations : ASIN → dossier → n° de cas → réponse Neo.</p>
+      Chaîne autorisations : ASIN → réponse Neo associée à l’ASIN → statut d’autorisation.</p>
     <div class="grille">
       ${tuile(c.commandes_sans_facture, 'Commandes sans facture', '#/commandes?filtre=sans_facture')}
       ${tuile(c.lignes_sans_commande, 'Lignes Sheets sans commande identifiée', '#/import-sheets')}
       ${tuile(c.asin_sans_autorisation_confirmee, 'ASIN sans statut d’autorisation confirmé', '#/autorisations')}
       ${tuile(c.gmail_a_traiter, 'Confirmations Gmail à rapprocher', '#/emails/gmail')}
-      ${tuile(c.neo_a_traiter, 'Réponses Neo à rapprocher', '#/emails/neo')}
+      ${tuile(c.neo_a_traiter, 'Réponses Neo à associer à un ASIN', '#/emails/neo')}
       ${tuile(c.ecarts_totaux, 'Totaux déclarés à vérifier (écart ou composition)', '#/commandes?filtre=ecart')}
       ${tuile(c.ecarts_couts, 'Écarts de coût d’achat à arbitrer', '#/asins?filtre=ecarts')}
       ${tuile(c.fournisseurs_a_valider, 'Lignes avec fournisseur à valider', '#/import-sheets')}

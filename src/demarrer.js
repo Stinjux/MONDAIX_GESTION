@@ -5,7 +5,7 @@ import { chargerEnv, cheminBase } from './env.js';
 import { estLocal } from './lib/acces.js';
 import { creerServeur } from './server.js';
 import { planifierSynchro } from './services/synchroEmail.js';
-import { migrerLiensEmails } from './services/emails.js';
+import { migrerLiensEmails, migrerNeoVersAsin } from './services/emails.js';
 import { migrerRelevesStock } from './services/inventaire.js';
 import { migrerReferencesFactures } from './services/documentsFactures.js';
 
@@ -50,6 +50,7 @@ export function demarrer() {
   }
   const db = ouvrirBase(cheminBase());
   migrerLiensEmails(db);
+  migrerNeoVersAsin(db);
   migrerRelevesStock(db);
   migrerReferencesFactures(db);
   const serveur = creerServeur(db, { acces: { utilisateur: process.env.MONDAIX_UTILISATEUR || 'admin', motDePasse } });

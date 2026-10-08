@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { ouvrirBase } from '../src/db.js';
-import { ingererEmail, lierEmail, delierEmail, lireEmail, emailsPourAsin, emailsPourCas, migrerLiensEmails } from '../src/services/emails.js';
+import { ingererEmail, lierEmail, delierEmail, lireEmail, emailsPourAsin, migrerLiensEmails, appliquerStatutNeo, listerEmails, migrerNeoVersAsin } from '../src/services/emails.js';
 import { creerCommande, creerFacture, creerReception } from '../src/services/commandes.js';
 import { creerEnvoi } from '../src/services/envois.js';
 import { creerDossier } from '../src/services/autorisations.js';
@@ -17,25 +17,49 @@ beforeEach(() => {
   db = ouvrirBase(':memory:');
 });
 
-test('emails Gmail et Neo liés à un ASIN ou un cas : automatique si unique, manuel sinon', () => {
-  const { id: n1 } = ingererEmail(db, 'neo', { sujet: 'Brand approval', corps: 'Case ID: 12345678901 for ASIN B0AAAAAAA1' });
+test('emails Gmail et Neo associés directement aux ASIN : automatique si un seul ASIN, manuel sinon', () => {
+  const { id: n1 } = ingererEmail(db, 'neo', { sujet: 'Brand approval', corps: 'Case ID: 12345678901 for ASIN B0AAAAAAA1 has been approved.' });
   const e1 = lireEmail(db, n1);
-  assert.deepEqual(e1.liens.map((l) => [l.type, l.valeur, l.mode]).sort(), [['asin', 'B0AAAAAAA1', 'auto'], ['cas', '12345678901', 'auto']]);
+  assert.deepEqual(e1.liens.map((l) => [l.type, l.valeur, l.mode]), [['asin', 'B0AAAAAAA1', 'auto']], 'aucun lien « numéro de cas »');
+  assert.equal(e1.statut_rapprochement, 'valide', 'réponse Neo associée = traitée');
+  assert.equal(e1.dossier_id, null, 'pas de rattachement à un dossier');
 
-  // Plusieurs ASIN cités : pas de lien automatique, liaison manuelle possible
   const { id: g1 } = ingererEmail(db, 'gmail', { sujet: 'Your order', corps: 'Items B0AAAAAAA2 and B0AAAAAAA3' });
   assert.equal(lireEmail(db, g1).liens.length, 0);
   lierEmail(db, g1, { type: 'asin', valeur: 'b0aaaaaaa2' });
-  lierEmail(db, g1, { type: 'cas', valeur: 'Case 98765432100' });
-  const e2 = lireEmail(db, g1);
-  assert.deepEqual(e2.liens.map((l) => `${l.type}:${l.valeur}:${l.mode}`).sort(), ['asin:B0AAAAAAA2:manuel', 'cas:98765432100:manuel']);
+  assert.throws(() => lierEmail(db, g1, { type: 'cas', valeur: '98765432100' }), /directement à un ASIN/);
   assert.throws(() => lierEmail(db, g1, { type: 'asin', valeur: 'pas-un-asin' }), /ASIN invalide/);
-
+  const e2 = lireEmail(db, g1);
+  assert.deepEqual(e2.liens.map((l) => `${l.type}:${l.valeur}:${l.mode}`), ['asin:B0AAAAAAA2:manuel']);
   assert.deepEqual(emailsPourAsin(db, 'B0AAAAAAA2').map((e) => e.id), [g1]);
-  assert.deepEqual(emailsPourCas(db, '12345678901').map((e) => e.id), [n1]);
-  delierEmail(db, e2.liens.find((l) => l.type === 'asin').id);
+  delierEmail(db, e2.liens[0].id);
   assert.equal(emailsPourAsin(db, 'B0AAAAAAA2').length, 0);
-  assert.ok(db.prepare("SELECT 1 FROM produits WHERE asin = 'B0AAAAAAA2'").get(), 'ASIN lié ajouté au catalogue');
+
+  // Neo sans ASIN détecté : à traiter jusqu'à l'association
+  const { id: n2 } = ingererEmail(db, 'neo', { sujet: 'Brand approval', corps: 'Your request has been approved.' });
+  assert.equal(listerEmails(db, { source: 'neo', statut: 'a_traiter' }).map((e) => e.id).join(), String(n2));
+  lierEmail(db, n2, { valeur: 'B0AAAAAAA3' });
+  assert.equal(listerEmails(db, { source: 'neo', statut: 'a_traiter' }).length, 0);
+});
+
+test('statut d’autorisation appliqué depuis la réponse Neo aux ASIN associés', () => {
+  creerDossier(db, { asin: 'B0AAAAAAA1', numero_cas: '11122233344' });
+  const { id } = ingererEmail(db, 'neo', { sujet: 'x', corps: 'ASIN B0AAAAAAA1 approved to sell' });
+  lierEmail(db, id, { valeur: 'B0AAAAAAA2' });
+  appliquerStatutNeo(db, id, 'approuve');
+  const dossiers = db.prepare('SELECT asin, statut, statut_confirme FROM dossiers_autorisation ORDER BY asin').all();
+  assert.deepEqual(dossiers.map((d) => [d.asin, d.statut, d.statut_confirme]), [['B0AAAAAAA1', 'approuve', 1], ['B0AAAAAAA2', 'approuve', 1]], 'dossier existant mis à jour, dossier créé au besoin');
+  const { id: sans } = ingererEmail(db, 'neo', { sujet: 'y', corps: 'approved' });
+  assert.throws(() => appliquerStatutNeo(db, sans, 'approuve'), /Associez d’abord/);
+});
+
+test('rattrapage : réponse Neo rattachée à un dossier → associée à l’ASIN du dossier', () => {
+  const did = creerDossier(db, { asin: 'B0AAAAAAA5' });
+  const { id } = ingererEmail(db, 'neo', { sujet: 'x', corps: 'sans référence' });
+  db.prepare("UPDATE emails SET dossier_id = ?, statut_rapprochement = 'valide', mode_rapprochement = 'manuel' WHERE id = ?").run(did, id);
+  migrerNeoVersAsin(db);
+  assert.deepEqual(lireEmail(db, id).liens.map((l) => l.valeur), ['B0AAAAAAA5']);
+  assert.equal(lireEmail(db, id).statut_rapprochement, 'valide');
 });
 
 test('rattrapage des liens pour les emails existants, exécuté une seule fois', () => {
@@ -102,7 +126,7 @@ test('fiche ASIN : chiffres clés et chronologie complète', () => {
   creerReception(db, c, { date_reception: '2026-09-05' });
   creerEnvoi(db, { numero_envoi: 'FBA9', date_envoi: '2026-09-10', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 2, commande_id: c }] });
   creerDossier(db, { asin: 'B0AAAAAAA1', numero_cas: '11122233344', date_demande: '2026-09-01' });
-  ingererEmail(db, 'neo', { sujet: 'Brand approval', corps: 'Case ID: 11122233344', date: '2026-09-03T00:00:00Z' });
+  ingererEmail(db, 'neo', { sujet: 'Brand approval', corps: 'Case ID: 11122233344 - ASIN B0AAAAAAA1', date: '2026-09-03T00:00:00Z' });
 
   inv(db, 'asin,qty\nB0AAAAAAA1,5\n', 'inv-1');
   inv(db, 'asin,qty\nB0AAAAAAA1,3\n', 'inv-2');

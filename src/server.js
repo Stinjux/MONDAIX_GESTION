@@ -136,8 +136,7 @@ export function creerRoutes(db) {
   r('GET', '/api/dossiers/:id', ({ p }) => {
     const d = autorisations.lireDossier(db, +p.id);
     const reponses = new Set(d.reponses.map((r) => r.id));
-    const parCas = d.numero_cas ? emails.emailsPourCas(db, d.numero_cas).filter((e) => !reponses.has(e.id)) : [];
-    return { ...d, emails_cas: parCas };
+    return { ...d, emails_asin: emails.emailsPourAsin(db, d.asin).filter((e) => !reponses.has(e.id)) };
   });
   r('PUT', '/api/dossiers/:id', ({ p, corps }) => {
     autorisations.modifierDossier(db, +p.id, corps);
@@ -174,7 +173,6 @@ export function creerRoutes(db) {
   r('POST', '/api/emails/:id/ignorer', ({ p }) => emails.ignorerEmail(db, +p.id));
   r('POST', '/api/emails/:id/liens', ({ p, corps }) => emails.lierEmail(db, +p.id, corps));
   r('DELETE', '/api/email-liens/:id', ({ p }) => emails.delierEmail(db, +p.id));
-  r('GET', '/api/cas/:numero/emails', ({ p }) => emails.emailsPourCas(db, p.numero));
   r('POST', '/api/emails/:id/statut', ({ p, corps }) => emails.appliquerStatutNeo(db, +p.id, corps.statut));
   r('POST', '/api/emails/:id/creer-commande', ({ p, corps }) => ({ id: emails.creerCommandeDepuisEmail(db, +p.id, corps) }));
 

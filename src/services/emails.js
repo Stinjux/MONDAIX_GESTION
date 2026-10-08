@@ -71,26 +71,20 @@ export function ingererEmail(db, source, message, modeSaisie = 'manuel') {
 
 /* ------------------------------------------------- liens email ↔ ASIN / cas */
 
-function nettoyerCas(valeur) {
-  const s = String(valeur ?? '').replace(/\D/g, '');
-  return s.length >= 6 ? s : null;
-}
-
-/** Associe un email (Gmail ou Neo) à un ASIN ou à un numéro de cas Amazon. */
-export function lierEmail(db, emailId, { type, valeur }, mode = 'manuel') {
+/**
+ * Associe un email (Gmail ou Neo) directement à un ASIN.
+ * (Les anciens liens « numéro de cas » restent en base mais ne sont plus créés ni affichés.)
+ */
+export function lierEmail(db, emailId, { type = 'asin', valeur }, mode = 'manuel') {
   lireEmail(db, emailId);
-  let v;
-  if (type === 'asin') {
-    v = normaliserAsin(valeur);
-    if (!v) throw new ErreurMetier('ASIN invalide.');
-    assurerProduit(db, v);
-  } else if (type === 'cas') {
-    v = nettoyerCas(valeur);
-    if (!v) throw new ErreurMetier('Numéro de cas invalide (chiffres attendus).');
-  } else throw new ErreurMetier('Type de lien invalide : asin ou cas.');
-  const r = db.prepare('INSERT OR IGNORE INTO email_liens (email_id, type, valeur, mode) VALUES (?, ?, ?, ?)').run(emailId, type, v, mode);
-  if (r.changes) journaliser(db, 'email', emailId, 'lien_ajoute', { type, valeur: v, mode });
-  return { type, valeur: v };
+  if (type !== 'asin') throw new ErreurMetier('Les emails s’associent directement à un ASIN.');
+  const v = normaliserAsin(valeur);
+  if (!v) throw new ErreurMetier('ASIN invalide.');
+  assurerProduit(db, v);
+  const r = db.prepare('INSERT OR IGNORE INTO email_liens (email_id, type, valeur, mode) VALUES (?, ?, ?, ?)').run(emailId, 'asin', v, mode);
+  if (r.changes) journaliser(db, 'email', emailId, 'lien_ajoute', { type: 'asin', valeur: v, mode });
+  majStatutNeo(db, emailId);
+  return { type: 'asin', valeur: v };
 }
 
 export function delierEmail(db, lienId) {
@@ -98,6 +92,19 @@ export function delierEmail(db, lienId) {
   if (!l) throw new ErreurMetier('Lien introuvable.', 404);
   db.prepare('DELETE FROM email_liens WHERE id = ?').run(lienId);
   journaliser(db, 'email', l.email_id, 'lien_retire', l);
+  majStatutNeo(db, l.email_id);
+}
+
+/** Réponse Neo : « rapprochée » dès qu'elle est associée à au moins un ASIN. */
+function majStatutNeo(db, emailId) {
+  const e = db.prepare('SELECT source, statut_rapprochement FROM emails WHERE id = ?').get(emailId);
+  if (!e || e.source !== 'neo' || e.statut_rapprochement === 'ignore') return;
+  const lien = db.prepare("SELECT mode FROM email_liens WHERE email_id = ? AND type = 'asin' ORDER BY mode = 'manuel' DESC LIMIT 1").get(emailId);
+  db.prepare("UPDATE emails SET statut_rapprochement = ?, mode_rapprochement = ?, propositions = '[]' WHERE id = ?").run(
+    lien ? 'valide' : 'non_rapproche',
+    lien ? lien.mode : null,
+    emailId,
+  );
 }
 
 export function liensEmail(db, emailId) {
@@ -113,9 +120,7 @@ export function lierReferencesDetectees(db, emailId) {
   const e = lireEmail(db, emailId);
   const refs = e.references_extraites;
   const asins = refs.asins || [];
-  const cas = refs.numerosCas || [];
   if (asins.length === 1) lierEmail(db, emailId, { type: 'asin', valeur: asins[0] }, 'auto');
-  if (cas.length === 1) lierEmail(db, emailId, { type: 'cas', valeur: cas[0] }, 'auto');
 }
 
 /** Emails liés à un ASIN : lien direct, dossier d'autorisation ou commande contenant l'ASIN. */
@@ -132,20 +137,6 @@ export function emailsPourAsin(db, asin) {
        ORDER BY e.date_reception DESC`,
     )
     .all(asin, asin, asin);
-}
-
-/** Emails liés à un numéro de cas (lien direct ou dossier portant ce numéro). */
-export function emailsPourCas(db, numeroCas) {
-  return db
-    .prepare(
-      `SELECT DISTINCT e.id, e.source, e.expediteur, e.sujet, e.date_reception
-       FROM emails e
-       LEFT JOIN email_liens l ON l.email_id = e.id AND l.type = 'cas' AND l.valeur = ?
-       LEFT JOIN dossiers_autorisation d ON d.id = e.dossier_id AND d.numero_cas = ?
-       WHERE l.id IS NOT NULL OR d.id IS NOT NULL
-       ORDER BY e.date_reception DESC`,
-    )
-    .all(numeroCas, numeroCas);
 }
 
 /** Rattrapage unique pour les emails reçus avant l'ajout des liens. */
@@ -194,39 +185,19 @@ function proposerCommandes(db, e) {
   return propositions.sort((a, b) => b.motifs.length - a.motifs.length).slice(0, 5);
 }
 
-function proposerDossiers(db, e) {
-  const refs = e.references_extraites;
-  const cas = refs.numerosCas || [];
-  const exacts = cas.length
-    ? db.prepare(`SELECT * FROM dossiers_autorisation WHERE numero_cas IN (${cas.map(() => '?').join(',')})`).all(...cas)
-    : [];
-  if (exacts.length) {
-    return exacts.map((d) => ({ dossier_id: d.id, asin: d.asin, numero_cas: d.numero_cas, statut: d.statut, motifs: ['n° de cas identique'], exacte: true }));
-  }
-  const asins = refs.asins || [];
-  if (!asins.length) return [];
-  return db
-    .prepare(`SELECT * FROM dossiers_autorisation WHERE asin IN (${asins.map(() => '?').join(',')}) ORDER BY id DESC`)
-    .all(...asins)
-    .map((d) => ({
-      dossier_id: d.id,
-      asin: d.asin,
-      numero_cas: d.numero_cas,
-      statut: d.statut,
-      motifs: [`ASIN ${d.asin} cité`, ...(cas.length && !d.numero_cas ? [`n° de cas ${cas[0]} à enregistrer`] : [])],
-      conflit_cas: Boolean(cas.length && d.numero_cas && !cas.includes(d.numero_cas)),
-      exacte: false,
-    }));
-}
-
 /**
  * Rapprochement automatique uniquement sur une référence exacte et unique
  * (n° de commande pour Gmail, n° de cas pour Neo). Sinon : propositions à valider.
  */
 export function rapprocherEmail(db, id) {
   const e = lireEmail(db, id);
+  if (e.source === 'neo') {
+    // Neo : association directe aux ASIN, sans dossier ni numéro de cas.
+    majStatutNeo(db, id);
+    return lireEmail(db, id);
+  }
   if (e.statut_rapprochement === 'valide' || e.statut_rapprochement === 'ignore') return e;
-  const propositions = e.module === 'commandes' ? proposerCommandes(db, e) : proposerDossiers(db, e);
+  const propositions = proposerCommandes(db, e);
   const exactes = propositions.filter((p) => p.exacte);
   if (exactes.length === 1) {
     const cible = exactes[0];
@@ -296,15 +267,50 @@ export function ignorerEmail(db, id) {
  * Applique au dossier le statut détecté dans la réponse Neo, après validation.
  * Le statut devient « confirmé » (réponse d'Amazon à l'appui).
  */
+/**
+ * Applique le statut d'autorisation lu dans une réponse Neo aux ASIN associés à l'email
+ * (dernier dossier de chaque ASIN, créé au besoin). Approuvé / refusé = statut confirmé.
+ */
 export function appliquerStatutNeo(db, id, statut) {
   const e = lireEmail(db, id);
-  if (e.source !== 'neo') throw new ErreurMetier('Seules les réponses Neo modifient un dossier d’autorisation.');
-  if (!e.dossier_id) throw new ErreurMetier('Rattachez d’abord la réponse à un dossier.');
+  if (e.source !== 'neo') throw new ErreurMetier('Seules les réponses Neo modifient une autorisation.');
   if (!(statut in STATUTS_DOSSIER)) throw new ErreurMetier('Statut invalide.');
-  const d = db.prepare('SELECT * FROM dossiers_autorisation WHERE id = ?').get(e.dossier_id);
+  const asins = e.liens.filter((l) => l.type === 'asin').map((l) => l.valeur);
+  if (!asins.length) throw new ErreurMetier('Associez d’abord l’email à un ASIN.');
   const confirme = ['approuve', 'refuse'].includes(statut) ? 1 : 0;
-  db.prepare("UPDATE dossiers_autorisation SET statut = ?, statut_confirme = ?, updated_at = datetime('now') WHERE id = ?").run(statut, confirme, d.id);
-  journaliser(db, 'dossier', d.id, 'statut_depuis_neo', { avant: d.statut, apres: statut, email_id: id });
+  return transaction(db, () => {
+    for (const asin of asins) {
+      const d = db.prepare('SELECT * FROM dossiers_autorisation WHERE asin = ? ORDER BY id DESC LIMIT 1').get(asin);
+      if (d) {
+        db.prepare("UPDATE dossiers_autorisation SET statut = ?, statut_confirme = ?, updated_at = datetime('now') WHERE id = ?").run(statut, confirme, d.id);
+        journaliser(db, 'dossier', d.id, 'statut_depuis_neo', { avant: d.statut, apres: statut, email_id: id });
+      } else {
+        const r = db.prepare('INSERT INTO dossiers_autorisation (asin, statut, statut_confirme) VALUES (?, ?, ?)').run(asin, statut, confirme);
+        journaliser(db, 'dossier', r.lastInsertRowid, 'creation_depuis_neo', { asin, statut, email_id: id });
+      }
+    }
+    return { asins };
+  });
+}
+
+/**
+ * Rattrapage unique : une réponse Neo rattachée à un dossier devient associée à l'ASIN
+ * de ce dossier ; le statut « à traiter » des réponses Neo est recalculé.
+ */
+export function migrerNeoVersAsin(db) {
+  if (lireParametre(db, 'migration.neo_asin') === '1') return;
+  transaction(db, () => {
+    const anciens = db
+      .prepare(
+        `SELECT e.id, d.asin, e.mode_rapprochement FROM emails e JOIN dossiers_autorisation d ON d.id = e.dossier_id
+         WHERE e.source = 'neo'`,
+      )
+      .all();
+    const ins = db.prepare("INSERT OR IGNORE INTO email_liens (email_id, type, valeur, mode) VALUES (?, 'asin', ?, ?)");
+    for (const a of anciens) ins.run(a.id, a.asin, a.mode_rapprochement === 'auto' ? 'auto' : 'manuel');
+    for (const { id } of db.prepare("SELECT id FROM emails WHERE source = 'neo'").all()) majStatutNeo(db, id);
+    db.prepare("INSERT INTO parametres (cle, valeur) VALUES ('migration.neo_asin', '1') ON CONFLICT(cle) DO UPDATE SET valeur = '1'").run();
+  });
 }
 
 /** Crée une commande à partir d'une confirmation Gmail non rapprochée. */

@@ -19,7 +19,7 @@ export async function pageEmails(zone, source) {
   const estGmail = source === 'gmail';
   zone.innerHTML = `
     <div class="entete"><div><h1>${esc(src.libelle)} · ${estGmail ? 'confirmations de commandes' : 'réponses d’autorisation'}</h1>
-      <p class="aide">${esc(src.role)}. Ces emails alimentent uniquement le module <strong>${estGmail ? 'Commandes fournisseurs' : 'Dossiers d’autorisation'}</strong>.
+      <p class="aide">${esc(src.role)}. ${estGmail ? 'Ces emails alimentent le module <strong>Commandes fournisseurs</strong>.' : 'Chaque réponse s’associe directement à un ou plusieurs <strong>ASIN</strong>.'}
       ${src.synchro.configuree
         ? `Connexion IMAP configurée · objet contenant ${src.synchro.mots_cles_objet.map((m) => `« ${esc(m)} »`).join(' ou ')}${src.synchro.expediteurs.length ? ` · expéditeurs ${esc(src.synchro.expediteurs.join(', '))}` : ''} · depuis le ${date(src.synchro.date_depart)}${src.synchro.derniere_synchro ? ` · dernière synchronisation ${new Date(src.synchro.derniere_synchro).toLocaleString('fr-CA')}` : ''}.`
         : 'Aucune connexion active : importez les emails (.eml), collez-les ou saisissez-les.'}</p>
@@ -30,7 +30,7 @@ export async function pageEmails(zone, source) {
     <div class="onglets">${[['a_traiter', `À traiter (${src.a_traiter})`], ['valide', 'Rapprochés'], ['ignore', 'Ignorés'], ['tous', 'Tous']]
       .map(([f, t]) => `<a href="#/emails/${source}?filtre=${f}" class="${f === filtre ? 'actif' : ''}">${t}</a>`).join('')}</div>
     ${tableau(
-      ['Reçu', 'Expéditeur', 'Sujet', 'Références détectées', 'ASIN / cas liés', 'Rapprochement', ''],
+      ['Reçu', 'Expéditeur', 'Sujet', 'Références détectées', 'ASIN associés', estGmail ? 'Rapprochement' : 'État', ''],
       emails.map((e) => ligne(e, estGmail, refs)),
       'Aucun email.',
     )}`;
@@ -86,8 +86,8 @@ export async function pageEmails(zone, source) {
   zone.querySelectorAll('[data-statut]').forEach((b) => {
     b.onclick = async () => {
       const ok = await modale({
-        titre: 'Appliquer le statut au dossier',
-        contenu: `<p>Le dossier passera au statut <strong>${esc(refs.statuts_dossier[b.dataset.statut])}</strong>, confirmé par cette réponse d’Amazon.</p>`,
+        titre: 'Appliquer le statut d’autorisation',
+        contenu: `<p>L’autorisation de <strong>${esc(b.dataset.asins)}</strong> passera au statut <strong>${esc(refs.statuts_dossier[b.dataset.statut])}</strong>, confirmé par cette réponse d’Amazon.</p>`,
         libelleValider: 'Appliquer',
         valider: () => post(`/api/emails/${b.dataset.email}/statut`, { statut: b.dataset.statut }),
       });
@@ -99,51 +99,48 @@ export async function pageEmails(zone, source) {
 function ligne(e, estGmail, refs) {
   const r = e.references_extraites;
   const [t, ton] = STATUTS[e.statut_rapprochement];
+  const asinsLies = (e.liens || []).filter((l) => l.type === 'asin');
   const refsTxt = estGmail
     ? [r.numerosCommande?.length ? `n° ${r.numerosCommande.join(', ')}` : '', r.montantTotal != null ? `total ${montant(r.montantTotal)}` : '', r.domaine || '', r.asins?.length ? r.asins.join(', ') : ''].filter(Boolean).join(' · ')
-    : [r.numerosCas?.length ? `cas ${r.numerosCas.join(', ')}` : '', r.asins?.length ? r.asins.join(', ') : '', r.statut ? `→ ${refs.statuts_dossier[r.statut]}` : ''].filter(Boolean).join(' · ');
-  const cible = estGmail
-    ? e.commande_id ? `<a href="#/commandes/${e.commande_id}">${esc(e.numero_commande || 'commande #' + e.commande_id)}</a>` : ''
-    : e.dossier_id ? `<a href="#/dossiers/${e.dossier_id}">dossier ${esc(e.dossier_asin)}${e.dossier_cas ? ' · cas ' + esc(e.dossier_cas) : ''}</a>` : '';
+    : [r.asins?.length ? r.asins.join(', ') : '', r.statut ? `→ ${refs.statuts_dossier[r.statut]}` : ''].filter(Boolean).join(' · ');
+  const cible = estGmail && e.commande_id ? `<a href="#/commandes/${e.commande_id}">${esc(e.numero_commande || 'commande #' + e.commande_id)}</a>` : '';
   const propositions =
-    e.statut_rapprochement === 'propose' || e.statut_rapprochement === 'ambigu'
+    estGmail && (e.statut_rapprochement === 'propose' || e.statut_rapprochement === 'ambigu')
       ? e.propositions
-          .map((p) => {
-            const corps = estGmail ? { commande_id: p.commande_id } : { dossier_id: p.dossier_id };
-            const libelle = estGmail ? `${p.numero_commande || '#' + p.commande_id}${p.fournisseur ? ' · ' + p.fournisseur : ''}` : `${p.asin}${p.numero_cas ? ' · cas ' + p.numero_cas : ''}`;
-            return `<button class="petit" data-email="${e.id}" data-valider='${esc(JSON.stringify(corps))}' title="${esc(p.motifs.join(', '))}">Valider : ${esc(libelle)}</button>${p.conflit_cas ? badge('n° de cas différent', 'erreur') : ''}${p.deja_confirmee ? badge('déjà une confirmation', 'alerte') : ''}`;
-          })
+          .map((p) => `<button class="petit" data-email="${e.id}" data-valider='${esc(JSON.stringify({ commande_id: p.commande_id }))}' title="${esc(p.motifs.join(', '))}">Valider : ${esc(`${p.numero_commande || '#' + p.commande_id}${p.fournisseur ? ' · ' + p.fournisseur : ''}`)}</button>${p.deja_confirmee ? badge('déjà une confirmation', 'alerte') : ''}`)
           .join(' ')
       : '';
-  const appliquer = !estGmail && e.dossier_id && r.statut ? `<button class="petit" data-email="${e.id}" data-statut="${r.statut}">Appliquer « ${esc(refs.statuts_dossier[r.statut])} »</button>` : '';
+  const appliquer =
+    !estGmail && r.statut && asinsLies.length
+      ? `<button class="petit" data-email="${e.id}" data-statut="${r.statut}" data-asins="${esc(asinsLies.map((l) => l.valeur).join(', '))}">Appliquer « ${esc(refs.statuts_dossier[r.statut])} » à ${asinsLies.length > 1 ? `${asinsLies.length} ASIN` : esc(asinsLies[0].valeur)}</button>`
+      : '';
+  const etat = estGmail ? `${badge(t, ton)}${e.mode_rapprochement === 'auto' ? ' ' + badge('auto') : ''} ${cible}` : e.statut_rapprochement === 'ignore' ? badge('ignoré') : asinsLies.length ? badge('associé', 'ok') : badge('ASIN à associer', 'alerte');
   return `<tr><td>${date(e.date_reception)}</td><td>${esc(e.expediteur || '')}</td><td>${esc(e.sujet || '')}</td><td>${esc(refsTxt || '—')}</td>
     <td>${celluleLiens(e)}</td>
-    <td>${badge(t, ton)}${e.mode_rapprochement === 'auto' ? ' ' + badge('auto') : ''} ${cible}<div class="actions" style="margin-top:4px">${propositions}${appliquer}</div></td>
+    <td>${etat}<div class="actions" style="margin-top:4px">${propositions}${appliquer}</div></td>
     <td><button class="petit" data-detail="${e.id}">Ouvrir</button></td></tr>`;
 }
 
-/** Liens ASIN / cas de l'email, suggestions issues des références détectées et ajout manuel. */
+/** ASIN associés à l'email, suggestions issues des ASIN détectés et ajout manuel. */
 function celluleLiens(e) {
   const r = e.references_extraites;
-  const liens = e.liens || [];
-  const dejaLie = (type, valeur) => liens.some((l) => l.type === type && l.valeur === valeur);
+  const liens = (e.liens || []).filter((l) => l.type === 'asin');
   const puces = liens.map(
-    (l) => `<div class="lien-email">${l.type === 'asin' ? asinLien(l.valeur) : `<span class="mono">cas ${esc(l.valeur)}</span>`}${l.mode === 'auto' ? ' ' + badge('auto') : ''}
-      <button class="petit" data-delier="${l.id}" title="Retirer ce lien" aria-label="Retirer ce lien">×</button></div>`,
+    (l) => `<div class="lien-email">${asinLien(l.valeur)}${l.mode === 'auto' ? ' ' + badge('auto') : ''}
+      <button class="petit" data-delier="${l.id}" title="Retirer cet ASIN" aria-label="Retirer cet ASIN">×</button></div>`,
   );
-  const suggestions = [
-    ...(r.asins || []).filter((a) => !dejaLie('asin', a)).map((a) => ({ type: 'asin', valeur: a, libelle: a })),
-    ...(r.numerosCas || []).filter((c) => !dejaLie('cas', c)).map((c) => ({ type: 'cas', valeur: c, libelle: `cas ${c}` })),
-  ].map((s) => `<button class="petit" data-email="${e.id}" data-lier='${esc(JSON.stringify({ type: s.type, valeur: s.valeur }))}' title="Lier cet email">+ ${esc(s.libelle)}</button>`);
-  return `${puces.join('')}<div class="actions" style="margin-top:4px">${suggestions.join('')}<button class="petit" data-nouveau-lien="${e.id}">+ Lier</button></div>`;
+  const suggestions = (r.asins || [])
+    .filter((a) => !liens.some((l) => l.valeur === a))
+    .map((a) => `<button class="petit" data-email="${e.id}" data-lier='${esc(JSON.stringify({ type: 'asin', valeur: a }))}' title="Associer cet ASIN">+ ${esc(a)}</button>`);
+  return `${puces.join('')}<div class="actions" style="margin-top:4px">${suggestions.join('')}<button class="petit" data-nouveau-lien="${e.id}">+ ASIN</button></div>`;
 }
 
 async function nouveauLien(id) {
   const ok = await modale({
-    titre: 'Lier l’email à un ASIN ou à un cas',
-    contenu: `<div class="champs">${selecteur('type', 'Type', [['asin', 'ASIN'], ['cas', 'N° de cas Amazon']])}${champ('valeur', 'ASIN ou numéro de cas', { attrs: 'required placeholder="B0… ou 12345678901"' })}</div>`,
-    libelleValider: 'Lier',
-    valider: (d) => post(`/api/emails/${id}/liens`, d),
+    titre: 'Associer l’email à un ASIN',
+    contenu: `<div class="champs">${champ('valeur', 'ASIN', { attrs: 'required placeholder="B0…"' })}</div>`,
+    libelleValider: 'Associer',
+    valider: (d) => post(`/api/emails/${id}/liens`, { type: 'asin', valeur: d.valeur }),
   });
   if (ok) rafraichir();
 }
@@ -151,29 +148,30 @@ async function nouveauLien(id) {
 async function detail(id, refs) {
   const e = await api(`/api/emails/${id}`);
   const estGmail = e.source === 'gmail';
-  const cibles = estGmail ? await api('/api/commandes') : await api('/api/dossiers');
-  const options = estGmail
-    ? cibles.map((c) => [c.id, `${c.numero_commande || '#' + c.id} · ${c.fournisseur || '?'} · ${montant(c.total_declare)}`])
-    : cibles.map((d) => [d.id, `${d.asin} · ${refs.statuts_dossier[d.statut]}${d.numero_cas ? ' · cas ' + d.numero_cas : ''}`]);
+  const commandes = estGmail ? await api('/api/commandes') : [];
+  const options = commandes.map((c) => [c.id, `${c.numero_commande || '#' + c.id} · ${c.fournisseur || '?'} · ${montant(c.total_declare)}`]);
+  const asinsLies = e.liens.filter((l) => l.type === 'asin');
   const action = await modale({
     titre: e.sujet || 'Email',
     contenu: `<p class="aide">${esc(e.expediteur || '')} · ${date(e.date_reception)} · saisi par ${esc(e.mode_saisie)}</p>
       <pre class="corps">${esc(e.corps || '')}</pre>
-      <h3>ASIN et cas liés</h3>
-      <p>${e.liens.length ? e.liens.map((l) => (l.type === 'asin' ? asinLien(l.valeur) : `<span class="mono">cas ${esc(l.valeur)}</span>`)).join(' · ') : '<span class="aide">Aucun.</span>'}</p>
-      <div class="champs">${selecteur('lien_type', 'Ajouter un lien', [['asin', 'ASIN'], ['cas', 'N° de cas Amazon']])}${champ('lien_valeur', 'ASIN ou numéro de cas (facultatif)')}</div>
-      <h3>${estGmail ? 'Rattacher à une commande' : 'Rattacher à un dossier d’autorisation'}</h3>
-      <div class="champs">${selecteur('cible', estGmail ? 'Commande' : 'Dossier', [['', '—'], ...options], estGmail ? e.commande_id || '' : e.dossier_id || '')}
-      ${selecteur('action', 'Action', [['aucune', 'Ne pas changer le rattachement'], ['valider', 'Valider le rattachement'], ['dissocier', 'Dissocier'], ['ignorer', 'Ignorer cet email'], ...(estGmail && !e.commande_id ? [['creer', 'Créer une commande depuis cet email']] : [])])}</div>`,
+      <h3>ASIN associés</h3>
+      <p>${asinsLies.length ? asinsLies.map((l) => asinLien(l.valeur)).join(' · ') : '<span class="aide">Aucun.</span>'}</p>
+      <div class="champs">${champ('lien_valeur', 'Associer un ASIN (facultatif)', { attrs: 'placeholder="B0…"' })}</div>
+      ${estGmail
+        ? `<h3>Rattacher à une commande</h3>
+      <div class="champs">${selecteur('cible', 'Commande', [['', '—'], ...options], e.commande_id || '')}
+      ${selecteur('action', 'Action', [['aucune', 'Ne pas changer le rattachement'], ['valider', 'Valider le rattachement'], ['dissocier', 'Dissocier'], ['ignorer', 'Ignorer cet email'], ...(!e.commande_id ? [['creer', 'Créer une commande depuis cet email']] : [])])}</div>`
+        : `<div class="champs">${selecteur('action', 'Action', [['aucune', 'Associer seulement'], ['ignorer', 'Ignorer cet email'], ...(e.statut_rapprochement === 'ignore' ? [['dissocier', 'Ne plus ignorer']] : [])])}</div>`}`,
     libelleValider: 'Appliquer',
     valider: async (d) => {
-      if (d.lien_valeur.trim()) await post(`/api/emails/${id}/liens`, { type: d.lien_type, valeur: d.lien_valeur });
+      if (d.lien_valeur.trim()) await post(`/api/emails/${id}/liens`, { type: 'asin', valeur: d.lien_valeur });
       if (d.action === 'aucune') return true;
       if (d.action === 'dissocier') return post(`/api/emails/${id}/dissocier`);
       if (d.action === 'ignorer') return post(`/api/emails/${id}/ignorer`);
       if (d.action === 'creer') return 'creer';
-      if (!d.cible) throw new Error('Choisissez une cible.');
-      return post(`/api/emails/${id}/valider`, estGmail ? { commande_id: Number(d.cible) } : { dossier_id: Number(d.cible) });
+      if (!d.cible) throw new Error('Choisissez une commande.');
+      return post(`/api/emails/${id}/valider`, { commande_id: Number(d.cible) });
     },
   });
   if (action === 'creer') return creerCommande(e);

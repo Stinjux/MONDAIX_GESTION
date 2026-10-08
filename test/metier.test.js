@@ -185,30 +185,20 @@ test('Gmail : correspondance faible → proposition à valider, jamais automatiq
   assert.equal(lireEmail(db, id).commande_id, c1);
 });
 
-test('Neo → dossiers ; statut confirmé seulement après validation', () => {
-  const did = creerDossier(db, { asin: 'B0AAAAAAA1', numero_cas: '12345678901' });
+test('Neo → ASIN ; statut confirmé seulement après validation', () => {
+  creerDossier(db, { asin: 'B0AAAAAAA1', numero_cas: '12345678901' });
   creerDossier(db, { asin: 'B0AAAAAAA2' });
   const { id } = ingererEmail(db, 'neo', { expediteur: 'seller-performance@amazon.ca', sujet: 'Case 12345678901', corps: 'Your request for ASIN B0AAAAAAA1 has been approved.' });
   const e = lireEmail(db, id);
   assert.equal(e.module, 'autorisations');
-  assert.equal(e.dossier_id, did);
+  assert.deepEqual(e.liens.map((l) => l.valeur), ['B0AAAAAAA1']);
   assert.equal(e.references_extraites.statut, 'approuve');
   let etat = etatParAsin(db).find((a) => a.asin === 'B0AAAAAAA1');
   assert.equal(etat.confirme, false, 'statut détecté non appliqué sans validation');
   appliquerStatutNeo(db, id, 'approuve');
   etat = etatParAsin(db).find((a) => a.asin === 'B0AAAAAAA1');
   assert.equal(etat.confirme, true);
-  assert.throws(() => validerRapprochement(db, id, { commande_id: 1 }), /dossier d’autorisation, pas à une commande/);
-});
-
-test('Neo : sans n° de cas connu, ASIN cité → proposition ; validation enregistre le n° de cas', () => {
-  const did = creerDossier(db, { asin: 'B0AAAAAAA2' });
-  const { id } = ingererEmail(db, 'neo', { sujet: 'Re: approval', corps: 'Case ID: 98765432100 – ASIN B0AAAAAAA2 – please provide additional information.' });
-  const e = lireEmail(db, id);
-  assert.equal(e.statut_rapprochement, 'propose');
-  assert.equal(e.dossier_id, null);
-  validerRapprochement(db, id, { dossier_id: did });
-  assert.equal(db.prepare('SELECT numero_cas FROM dossiers_autorisation WHERE id = ?').get(did).numero_cas, '98765432100');
+  assert.equal(etatParAsin(db).find((a) => a.asin === 'B0AAAAAAA2').confirme, false, 'ASIN non associé inchangé');
 });
 
 test('tableau de bord : commandes sans facture, lignes sans commande, ASIN sans autorisation confirmée', () => {

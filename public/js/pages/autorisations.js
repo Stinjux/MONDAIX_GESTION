@@ -61,9 +61,9 @@ export async function pageDossier(zone, id) {
         <td>${badge(r.mode_rapprochement === 'auto' ? 'auto (n° de cas)' : 'validé', 'ok')}</td></tr>`),
       'Aucune réponse. Les réponses arrivent dans « Neo · réponses ».',
     )}
-    ${d.emails_cas.length ? `<h2>Autres emails liés au cas ${esc(d.numero_cas)}</h2>
+    ${d.emails_asin.length ? `<h2>Emails associés à l’ASIN ${esc(d.asin)}</h2>
     ${tableau(['Reçu', 'Boîte', 'Expéditeur', 'Objet'],
-      d.emails_cas.map((e) => `<tr><td>${date(e.date_reception)}</td><td>${e.source === 'gmail' ? 'Gmail' : 'Neo'}</td><td>${esc(e.expediteur || '')}</td>
+      d.emails_asin.map((e) => `<tr><td>${date(e.date_reception)}</td><td>${e.source === 'gmail' ? 'Gmail' : 'Neo'}</td><td>${esc(e.expediteur || '')}</td>
         <td><a href="#/emails/${e.source}?filtre=tous&email=${e.id}">${esc(e.sujet || '(sans objet)')}</a></td></tr>`))}` : ''}`;
   zone.querySelector('#modifier').onclick = async () => {
     const ok = await modale({
