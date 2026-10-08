@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { ouvrirBase } from '../src/db.js';
-import { deposerDocument, extraireAvecClaude, extraireDocument, validerDocument, supprimerDocument, lireDocument, propositions } from '../src/services/documentsFactures.js';
+import { deposerDocument, extraireAvecClaude, extraireDocument, validerDocument, supprimerDocument, lireDocument, propositions, migrerReferencesFactures } from '../src/services/documentsFactures.js';
 import { creerCommande, lireCommande, supprimerFacture, listerFactures } from '../src/services/commandes.js';
 import { coutRetenu } from '../src/services/couts.js';
 
@@ -120,4 +120,10 @@ test('facture déposée enregistrée sans commande : articles associés aux ASIN
   assert.deepEqual(facture.lignes.map((l) => l.asin), ['B0AAAAAAA1', 'B0AAAAAAA2']);
   assert.equal(facture.document_id, d.id);
   assert.equal(facture.fournisseur, 'Walmart Canada', 'fournisseur lu sur la facture');
+  assert.equal(facture.numero_commande_ref, 'W-2001', 'n° de commande conservé, sans rattachement');
+  // rattrapage pour une facture enregistrée sans ce numéro par la version précédente
+  db.prepare('UPDATE factures SET numero_commande_ref = NULL').run();
+  assert.equal(migrerReferencesFactures(db), 1);
+  assert.equal(listerFactures(db)[0].numero_commande_ref, 'W-2001');
+  assert.equal(listerFactures(db)[0].commande_id, null);
 });

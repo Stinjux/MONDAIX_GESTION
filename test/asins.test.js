@@ -6,6 +6,7 @@ import { creerCommande, creerFacture, creerReception } from '../src/services/com
 import { creerEnvoi } from '../src/services/envois.js';
 import { creerDossier } from '../src/services/autorisations.js';
 import { statistiques, montantCommande } from '../src/services/statistiques.js';
+import { creerFacture as creerFactureSeule } from '../src/services/commandes.js';
 import { listerAsins, ficheAsin } from '../src/services/asins.js';
 import { importerInventaire, etatStock } from '../src/services/inventaire.js';
 
@@ -121,4 +122,19 @@ test('fiche ASIN : chiffres clés et chronologie complète', () => {
   const dates = f.evenements.map((e) => e.date || '');
   assert.deepEqual(dates, [...dates].sort().reverse(), 'chronologie triée du plus récent au plus ancien');
   assert.throws(() => ficheAsin(db, 'B0ZZZZZZZZ'), /ASIN inconnu/);
+});
+
+test('dépenses : factures enregistrées seules comptées, sans double comptage avec une commande', () => {
+  const maintenant = new Date('2026-10-08T12:00:00Z');
+  creerCommande(db, { numero_commande: 'W-9', date_commande: '2026-10-05', total_declare: 100, lignes: [{ asin: 'B0AAAAAAA1', quantite: 4 }] });
+  // facture seule : comptée (montant, commande, unités)
+  creerFactureSeule(db, { numero_facture: 'F-1', date_facture: '2026-10-06', total: 40, lignes: [{ asin: 'B0AAAAAAA2', quantite: 5, prix_unitaire_ht: 8 }] });
+  // facture du même achat que la commande W-9 (même n°, non rattachée) : non recomptée
+  creerFactureSeule(db, { numero_facture: 'F-2', date_facture: '2026-10-06', total: 100, numero_commande_ref: 'W-9', rattacher_auto: false });
+  // facture de la période précédente
+  creerFactureSeule(db, { numero_facture: 'F-0', date_facture: '2026-09-28', sous_total_ht: 20, taxes: 3 });
+  const i = statistiques(db, '7j', maintenant).indicateurs;
+  assert.deepEqual([i.depenses.courant, i.depenses.dont_commandes, i.depenses.dont_factures, i.depenses.nb_factures], [140, 100, 40, 1]);
+  assert.equal(i.depenses.precedent, 23);
+  assert.deepEqual([i.commandes.courant, i.unites_commandees.courant], [2, 9]);
 });

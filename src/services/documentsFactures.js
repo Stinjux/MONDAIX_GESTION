@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
-import { ErreurMetier, journaliser, transaction } from '../db.js';
+import { ErreurMetier, journaliser, lireParametre, transaction } from '../db.js';
 import { cheminBase } from '../env.js';
 import { normaliserAsin, normaliserReference, normaliserTexte } from '../lib/parse.js';
 import { creerFacture } from './commandes.js';
@@ -243,7 +243,9 @@ export function validerDocument(db, id, saisie) {
     const facture = creerFacture(db, {
       commande_id: saisie.commande_id || null,
       numero_facture: saisie.numero_facture,
-      numero_commande_ref: saisie.numero_commande_ref,
+      // N° de commande lu sur la facture : conservé pour éviter un double comptage, sans rattachement.
+      numero_commande_ref: saisie.numero_commande_ref ?? d.extraction?.numero_commande ?? null,
+      rattacher_auto: false,
       date_facture: saisie.date_facture,
       sous_total_ht: saisie.sous_total_ht,
       taxes: saisie.taxes,
@@ -274,4 +276,29 @@ export function supprimerDocument(db, id) {
 
 export function extractionConfiguree() {
   return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+/**
+ * Rattrapage unique : n° de commande lu sur le document recopié sur les factures déjà
+ * enregistrées sans ce numéro (sans rattachement), pour éviter un double comptage des dépenses.
+ */
+export function migrerReferencesFactures(db) {
+  if (lireParametre(db, 'migration.references_factures') === '1') return 0;
+  let n = 0;
+  transaction(db, () => {
+    const lignes = db
+      .prepare(
+        `SELECT f.id, json_extract(d.extraction, '$.numero_commande') AS numero
+         FROM factures f JOIN facture_documents d ON d.facture_id = f.id
+         WHERE f.numero_commande_ref IS NULL AND d.extraction IS NOT NULL`,
+      )
+      .all();
+    for (const l of lignes) {
+      if (!l.numero) continue;
+      db.prepare('UPDATE factures SET numero_commande_ref = ? WHERE id = ?').run(l.numero, l.id);
+      n++;
+    }
+    db.prepare("INSERT INTO parametres (cle, valeur) VALUES ('migration.references_factures', '1') ON CONFLICT(cle) DO UPDATE SET valeur = '1'").run();
+  });
+  return n;
 }

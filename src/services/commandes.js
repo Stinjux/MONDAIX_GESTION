@@ -170,7 +170,8 @@ export function creerFacture(db, f) {
   return transaction(db, () => {
     let commandeId = f.commande_id ? Number(f.commande_id) : null;
     let proposition = null;
-    if (!commandeId && f.numero_commande_ref) {
+    // Rattachement automatique par n° de commande, sauf si désactivé (factures déposées).
+    if (!commandeId && f.numero_commande_ref && f.rattacher_auto !== false) {
       const ref = normaliserReference(f.numero_commande_ref);
       const candidates = db.prepare('SELECT id, numero_commande FROM commandes').all().filter((c) => normaliserReference(c.numero_commande) === ref);
       if (candidates.length === 1) commandeId = candidates[0].id;

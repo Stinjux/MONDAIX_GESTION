@@ -1,5 +1,5 @@
 // Indicateurs du tableau de bord par période glissante, comparés à la période précédente.
-import { arrondir } from '../lib/parse.js';
+import { arrondir, normaliserReference } from '../lib/parse.js';
 import { totalFacture } from './commandes.js';
 import { etatStock } from './inventaire.js';
 
@@ -49,7 +49,8 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
   const commandes = db.prepare('SELECT * FROM commandes').all();
   const facturesPar = db.prepare('SELECT * FROM factures WHERE commande_id = ?');
   const lignesPar = db.prepare('SELECT * FROM commande_lignes WHERE commande_id = ?');
-  const agr = { courant: { depenses: 0, unites: 0, commandes: 0, estimees: 0 }, precedent: { depenses: 0, unites: 0, commandes: 0, estimees: 0 } };
+  const vide = () => ({ depenses: 0, unites: 0, commandes: 0, estimees: 0, depenses_commandes: 0, depenses_factures: 0, factures: 0 });
+  const agr = { courant: vide(), precedent: vide() };
   for (const c of commandes) {
     const d = c.date_commande || String(c.created_at).slice(0, 10);
     const cle = dans(d, debut, fin) ? 'courant' : dans(d, debutPrecedent, debut) ? 'precedent' : null;
@@ -57,9 +58,29 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
     const lignes = lignesPar.all(c.id);
     const m = montantCommande(c, facturesPar.all(c.id), lignes);
     agr[cle].depenses += m.montant;
+    agr[cle].depenses_commandes += m.montant;
     agr[cle].unites += lignes.reduce((s, l) => s + l.quantite, 0);
     agr[cle].commandes++;
     if (m.base !== 'total_declare') agr[cle].estimees++;
+  }
+
+  // Factures enregistrées seules (sans commande) : ce sont aussi des achats.
+  // Une facture portant le n° d'une commande existante est déjà comptée avec cette commande.
+  const numerosCommandes = new Set(commandes.map((c) => normaliserReference(c.numero_commande)).filter(Boolean));
+  const facturesSeules = db.prepare('SELECT * FROM factures WHERE commande_id IS NULL').all();
+  const lignesFacture = db.prepare('SELECT quantite FROM facture_lignes WHERE facture_id = ?');
+  for (const f of facturesSeules) {
+    const ref = normaliserReference(f.numero_commande_ref);
+    if (ref && numerosCommandes.has(ref)) continue;
+    const d = f.date_facture || String(f.created_at).slice(0, 10);
+    const cle = dans(d, debut, fin) ? 'courant' : dans(d, debutPrecedent, debut) ? 'precedent' : null;
+    if (!cle) continue;
+    const montant = totalFacture(f) ?? 0;
+    agr[cle].depenses += montant;
+    agr[cle].depenses_factures += montant;
+    agr[cle].unites += lignesFacture.all(f.id).reduce((s, l) => s + l.quantite, 0);
+    agr[cle].commandes++;
+    agr[cle].factures++;
   }
 
   // Envois Amazon expédiés (ceux encore en préparation ne comptent pas)
@@ -94,7 +115,13 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
     du: debut,
     au: fin,
     indicateurs: {
-      depenses: { ...variation(arrondir(agr.courant.depenses), arrondir(agr.precedent.depenses)), commandes_sans_total: agr.courant.estimees },
+      depenses: {
+        ...variation(arrondir(agr.courant.depenses), arrondir(agr.precedent.depenses)),
+        commandes_sans_total: agr.courant.estimees,
+        dont_commandes: arrondir(agr.courant.depenses_commandes),
+        dont_factures: arrondir(agr.courant.depenses_factures),
+        nb_factures: agr.courant.factures,
+      },
       commandes: variation(agr.courant.commandes, agr.precedent.commandes),
       unites_commandees: variation(agr.courant.unites, agr.precedent.unites),
       envois: variation(env.courant.envois, env.precedent.envois),

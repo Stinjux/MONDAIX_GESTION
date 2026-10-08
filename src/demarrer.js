@@ -7,6 +7,7 @@ import { creerServeur } from './server.js';
 import { planifierSynchro } from './services/synchroEmail.js';
 import { migrerLiensEmails } from './services/emails.js';
 import { migrerRelevesStock } from './services/inventaire.js';
+import { migrerReferencesFactures } from './services/documentsFactures.js';
 
 /**
  * L'application est considérée comme exposée sur Internet si elle écoute ailleurs
@@ -50,6 +51,7 @@ export function demarrer() {
   const db = ouvrirBase(cheminBase());
   migrerLiensEmails(db);
   migrerRelevesStock(db);
+  migrerReferencesFactures(db);
   const serveur = creerServeur(db, { acces: { utilisateur: process.env.MONDAIX_UTILISATEUR || 'admin', motDePasse } });
   // Sous Passenger, l'appel à listen() est intercepté : le port et l'hôte sont alors ignorés.
   serveur.listen(port, hote, () => console.log(`Mondaix Gestion : http://${hote}:${port}${motDePasse ? ' (protégé par mot de passe)' : ''}`));

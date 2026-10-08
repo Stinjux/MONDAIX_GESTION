@@ -47,9 +47,9 @@ function rendreIndicateurs(s) {
           })
         : `<a class="tuile indicateur" href="#/asins"><div class="libelle">Unités en stock</div><div class="valeur">0</div><div class="variation">Aucun import d’inventaire (page ASIN)</div></a>`}
     </div>
-    <p class="aide">Du ${date(s.du)} (exclu) au ${date(s.au)}. Dépenses : prix total des commandes issu du Google Sheets${
-      i.depenses.commandes_sans_total ? ` (${i.depenses.commandes_sans_total} commande(s) sans prix total : facture ou lignes utilisées)` : ''
-    }. Stock : dernier import du fichier d’inventaire, comparé à l’import précédent (indépendant de la période).</p>`;
+    <p class="aide">Du ${date(s.du)} (exclu) au ${date(s.au)}. Dépenses : ${montant(i.depenses.dont_commandes)} de commandes (prix total du Google Sheets${
+      i.depenses.commandes_sans_total ? `, ou facture pour ${i.depenses.commandes_sans_total} commande(s) sans prix total` : ''
+    }) + ${montant(i.depenses.dont_factures)} de ${i.depenses.nb_factures} facture(s) enregistrée(s) seule(s) ; une facture portant le n° d’une commande existante n’est comptée qu’une fois. Les commandes passées et unités commandées incluent ces factures. Stock : dernier import du fichier d’inventaire, comparé à l’import précédent (indépendant de la période).</p>`;
 }
 
 export async function pageTableauDeBord(zone) {
