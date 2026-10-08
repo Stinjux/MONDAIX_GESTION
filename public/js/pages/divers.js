@@ -118,6 +118,7 @@ function carteSource(s) {
       ${y.configuree ? `<button data-synchro="${s.source}" ${y.en_cours ? 'disabled' : ''}>${y.en_cours ? 'Synchronisation…' : 'Synchroniser maintenant'}</button>` : ''}</div>
     <div class="champs" style="margin-bottom:0">
       <div><label>Compte</label>${esc(y.utilisateur || 'non configuré')}${y.hote ? ` <span class="aide">(${esc(y.hote)})</span>` : ''}</div>
+      ${y.empreinte_mot_de_passe ? `<div><label>Mot de passe chargé</label>${esc(y.empreinte_mot_de_passe)}</div>` : ''}
       <div><label>Dossier lu</label>${esc(y.dossier === '\\All' ? 'Tous les messages' : y.dossier)}</div>
       <div><label>Objet contenant</label>${y.mots_cles_objet.map((m) => badge(m, 'info')).join(' ')}</div>
       <div><label>Expéditeurs</label>${y.expediteurs.length ? y.expediteurs.map((d) => badge(d)).join(' ') : 'tous'}</div>

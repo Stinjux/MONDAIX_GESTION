@@ -75,6 +75,8 @@ export function etatSynchro(db, source, config = configSource(source)) {
     configuree: config.configuree,
     hote: config.hote || null,
     utilisateur: config.utilisateur || null,
+    // Empreinte pour vérifier la valeur réellement chargée (longueur + 2 derniers caractères).
+    empreinte_mot_de_passe: config.motDePasse ? `${config.motDePasse.length} caractères, se termine par « ${config.motDePasse.slice(-2)} »` : null,
     dossier: etat.dossier || config.dossier,
     mots_cles_objet: config.motsClesObjet,
     expediteurs: config.expediteurs,

@@ -101,6 +101,7 @@ test('synchro Gmail : lecture seule, dossier « Tous les messages », filtre, ra
   assert.equal(r2.examines, 0);
   assert.equal(r2.importes, 0);
   assert.equal(etatSynchro(db, 'gmail', config).derniere_erreur, null);
+  assert.equal(etatSynchro(db, 'gmail', config).empreinte_mot_de_passe, '1 caractères, se termine par « x »');
 });
 
 test('synchro Neo : seuls les emails Amazon « brand approval » vont aux autorisations', async () => {
