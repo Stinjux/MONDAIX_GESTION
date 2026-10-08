@@ -71,6 +71,8 @@ test('filtres par défaut : objet « order » / « shopping » pour Gmail ; Amaz
   assert.ok(!correspondFiltre(n, { sujet: 'Brand approval', expediteur: 'scam@amaz0n.com' }));
   assert.ok(!correspondFiltre(n, { sujet: 'Your Amazon order', expediteur: 'x@amazon.com' }));
   assert.equal(configSource('neo', {}).configuree, false);
+  assert.equal(configSource('gmail', { GMAIL_UTILISATEUR: ' moi@gmail.com ', GMAIL_MOT_DE_PASSE: 'abcd efgh ijkl mnop' }).motDePasse, 'abcdefghijklmnop');
+  assert.equal(configSource('gmail', { GMAIL_UTILISATEUR: ' moi@gmail.com ', GMAIL_MOT_DE_PASSE: 'x' }).utilisateur, 'moi@gmail.com');
 });
 
 test('synchro Gmail : lecture seule, dossier « Tous les messages », filtre, rapprochement, incrémental', async () => {
@@ -116,9 +118,10 @@ test('synchro Neo : seuls les emails Amazon « brand approval » vont aux autori
 });
 
 test('échec de connexion enregistré sans exposer le mot de passe', async () => {
-  const client = { async connect() { const e = new Error('Invalid credentials'); e.authenticationFailed = true; throw e; }, close() {} };
+  const client = { async connect() { const e = new Error('Invalid credentials'); e.authenticationFailed = true; e.responseText = 'Application-specific password required'; throw e; }, close() {} };
   const r = await synchroniserSource(db, 'gmail', { config: configSource('gmail', ENV), creerClient: () => client });
   assert.match(r.echec, /Identifiants refusés/);
+  assert.match(r.echec, /Application-specific password required/);
   assert.match(etatSynchro(db, 'gmail').derniere_erreur || etatSynchro(db, 'gmail', configSource('gmail', ENV)).derniere_erreur, /Identifiants refusés/);
 });
 

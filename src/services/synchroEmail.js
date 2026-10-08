@@ -22,8 +22,11 @@ function liste(valeur, defaut) {
 export function configSource(source, env = process.env) {
   const P = source.toUpperCase();
   const hote = env[`${P}_IMAP_HOTE`] || (source === 'gmail' ? 'imap.gmail.com' : '');
-  const utilisateur = env[`${P}_UTILISATEUR`] || '';
-  const motDePasse = env[`${P}_MOT_DE_PASSE`] || '';
+  const utilisateur = (env[`${P}_UTILISATEUR`] || '').trim();
+  // Google affiche le mot de passe d'application par groupes (« abcd efgh ijkl mnop ») :
+  // il ne contient jamais d'espace, on retire donc ceux copiés avec.
+  const brut = env[`${P}_MOT_DE_PASSE`] || '';
+  const motDePasse = source === 'gmail' ? brut.replace(/\s+/g, '') : brut;
   return {
     source,
     hote,
@@ -98,7 +101,10 @@ function creerClientImap(config) {
 }
 
 function messageErreur(e) {
-  if (e.authenticationFailed) return 'Identifiants refusés par le serveur (vérifiez l’adresse et le mot de passe d’application).';
+  if (e.authenticationFailed) {
+    const detail = e.responseText ? ` Réponse du serveur : « ${e.responseText} »` : '';
+    return `Identifiants refusés par le serveur (vérifiez l’adresse et le mot de passe d’application).${detail}`;
+  }
   if (e.code === 'ENOTFOUND') return 'Serveur IMAP introuvable (vérifiez le nom du serveur).';
   if (e.code === 'ECONNREFUSED' || e.code === 'ETIMEDOUT') return 'Connexion au serveur IMAP impossible.';
   return e.responseText || e.message || 'Erreur inconnue';
