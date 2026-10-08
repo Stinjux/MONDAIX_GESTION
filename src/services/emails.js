@@ -3,9 +3,9 @@
 //   Neo   → module « autorisations » : réponses aux demandes d'autorisation de vente Amazon.
 // Une source n'alimente jamais l'autre module (contrainte aussi imposée par la base).
 import { createHash } from 'node:crypto';
-import { ErreurMetier, journaliser, lireParametre, transaction } from '../db.js';
+import { ErreurMetier, assurerProduit, journaliser, lireParametre, transaction } from '../db.js';
 import { extraireReferences, parserEml } from '../lib/email.js';
-import { normaliserReference } from '../lib/parse.js';
+import { normaliserAsin, normaliserReference } from '../lib/parse.js';
 import { creerCommande } from './commandes.js';
 import { trouverParDomaine } from './fournisseurs.js';
 import { STATUTS_DOSSIER } from './autorisations.js';
@@ -27,7 +27,7 @@ function versObjet(e) {
 export function lireEmail(db, id) {
   const e = versObjet(db.prepare('SELECT * FROM emails WHERE id = ?').get(id));
   if (!e) throw new ErreurMetier('Email introuvable.', 404);
-  return e;
+  return { ...e, liens: db.prepare('SELECT * FROM email_liens WHERE email_id = ? ORDER BY type, valeur').all(id) };
 }
 
 export function etatSources(db) {
@@ -65,7 +65,98 @@ export function ingererEmail(db, source, message, modeSaisie = 'manuel') {
   const id = Number(r.lastInsertRowid);
   journaliser(db, 'email', id, 'reception', { source, module, mode: modeSaisie });
   rapprocherEmail(db, id);
+  lierReferencesDetectees(db, id);
   return { id, doublon: false };
+}
+
+/* ------------------------------------------------- liens email ↔ ASIN / cas */
+
+function nettoyerCas(valeur) {
+  const s = String(valeur ?? '').replace(/\D/g, '');
+  return s.length >= 6 ? s : null;
+}
+
+/** Associe un email (Gmail ou Neo) à un ASIN ou à un numéro de cas Amazon. */
+export function lierEmail(db, emailId, { type, valeur }, mode = 'manuel') {
+  lireEmail(db, emailId);
+  let v;
+  if (type === 'asin') {
+    v = normaliserAsin(valeur);
+    if (!v) throw new ErreurMetier('ASIN invalide.');
+    assurerProduit(db, v);
+  } else if (type === 'cas') {
+    v = nettoyerCas(valeur);
+    if (!v) throw new ErreurMetier('Numéro de cas invalide (chiffres attendus).');
+  } else throw new ErreurMetier('Type de lien invalide : asin ou cas.');
+  const r = db.prepare('INSERT OR IGNORE INTO email_liens (email_id, type, valeur, mode) VALUES (?, ?, ?, ?)').run(emailId, type, v, mode);
+  if (r.changes) journaliser(db, 'email', emailId, 'lien_ajoute', { type, valeur: v, mode });
+  return { type, valeur: v };
+}
+
+export function delierEmail(db, lienId) {
+  const l = db.prepare('SELECT * FROM email_liens WHERE id = ?').get(lienId);
+  if (!l) throw new ErreurMetier('Lien introuvable.', 404);
+  db.prepare('DELETE FROM email_liens WHERE id = ?').run(lienId);
+  journaliser(db, 'email', l.email_id, 'lien_retire', l);
+}
+
+export function liensEmail(db, emailId) {
+  return db.prepare('SELECT * FROM email_liens WHERE email_id = ? ORDER BY type, valeur').all(emailId);
+}
+
+/**
+ * Liaison automatique d'une référence détectée sans ambiguïté :
+ * un seul ASIN cité → lien ASIN ; un seul n° de cas cité → lien cas.
+ * Plusieurs références → simples suggestions, à valider dans l'interface.
+ */
+export function lierReferencesDetectees(db, emailId) {
+  const e = lireEmail(db, emailId);
+  const refs = e.references_extraites;
+  const asins = refs.asins || [];
+  const cas = refs.numerosCas || [];
+  if (asins.length === 1) lierEmail(db, emailId, { type: 'asin', valeur: asins[0] }, 'auto');
+  if (cas.length === 1) lierEmail(db, emailId, { type: 'cas', valeur: cas[0] }, 'auto');
+}
+
+/** Emails liés à un ASIN : lien direct, dossier d'autorisation ou commande contenant l'ASIN. */
+export function emailsPourAsin(db, asin) {
+  return db
+    .prepare(
+      `SELECT DISTINCT e.id, e.source, e.expediteur, e.sujet, e.date_reception, e.commande_id, e.dossier_id,
+         CASE WHEN l.id IS NOT NULL THEN 'lien direct' WHEN d.id IS NOT NULL THEN 'dossier d’autorisation' ELSE 'commande' END AS via
+       FROM emails e
+       LEFT JOIN email_liens l ON l.email_id = e.id AND l.type = 'asin' AND l.valeur = ?
+       LEFT JOIN dossiers_autorisation d ON d.id = e.dossier_id AND d.asin = ?
+       LEFT JOIN commande_lignes cl ON cl.commande_id = e.commande_id AND cl.asin = ?
+       WHERE l.id IS NOT NULL OR d.id IS NOT NULL OR cl.id IS NOT NULL
+       ORDER BY e.date_reception DESC`,
+    )
+    .all(asin, asin, asin);
+}
+
+/** Emails liés à un numéro de cas (lien direct ou dossier portant ce numéro). */
+export function emailsPourCas(db, numeroCas) {
+  return db
+    .prepare(
+      `SELECT DISTINCT e.id, e.source, e.expediteur, e.sujet, e.date_reception
+       FROM emails e
+       LEFT JOIN email_liens l ON l.email_id = e.id AND l.type = 'cas' AND l.valeur = ?
+       LEFT JOIN dossiers_autorisation d ON d.id = e.dossier_id AND d.numero_cas = ?
+       WHERE l.id IS NOT NULL OR d.id IS NOT NULL
+       ORDER BY e.date_reception DESC`,
+    )
+    .all(numeroCas, numeroCas);
+}
+
+/** Rattrapage unique pour les emails reçus avant l'ajout des liens. */
+export function migrerLiensEmails(db) {
+  if (lireParametre(db, 'migration.email_liens') === '1') return 0;
+  const ids = db.prepare('SELECT id FROM emails').all().map((r) => r.id);
+  transaction(db, () => {
+    for (const id of ids) lierReferencesDetectees(db, id);
+    db.prepare("INSERT INTO parametres (cle, valeur) VALUES ('migration.email_liens', '1') ON CONFLICT(cle) DO UPDATE SET valeur = '1'").run();
+  });
+  return ids.length;
 }
 
 export function ingererEml(db, source, brut, modeSaisie = 'eml') {
@@ -265,5 +356,6 @@ export function listerEmails(db, { source, statut } = {}) {
        ORDER BY e.date_reception DESC, e.id DESC`,
     )
     .all(...params)
-    .map(versObjet);
+    .map(versObjet)
+    .map((e) => ({ ...e, liens: liensEmail(db, e.id) }));
 }

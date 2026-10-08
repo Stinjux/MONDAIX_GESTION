@@ -1,4 +1,4 @@
-import { api, post, put, esc, montant, badge, toast, tenter, modale, champ, selecteur, selecteurTriEtat, lireFichierTexte, date } from '../outils.js';
+import { api, post, put, esc, montant, badge, toast, tenter, modale, champ, selecteur, selecteurTriEtat, lireFichierTexte, date, asinLien } from '../outils.js';
 import { rafraichir } from '../app.js';
 
 // État conservé entre deux rendus de la page.
@@ -194,7 +194,7 @@ function rendreLigne(l, prop) {
   return `<tr class="${sel ? 'selection' : ''}">
     <td>${l.statut === 'rattachee' ? '' : `<input type="checkbox" data-sel="${l.id}" ${sel ? 'checked' : ''}>`}</td>
     <td>${esc(l.import_nom)} · ${l.numero_ligne}</td>
-    <td class="mono">${esc(l.asin || '?')}</td>
+    <td>${asinLien(l.asin)}</td>
     <td><span class="lien-court" title="${esc(l.lien_original || '')}">${esc(l.lien_original || '—')}</span></td>
     <td>${fournisseur}</td>
     <td class="num">${l.quantite ?? '?'}</td>
@@ -297,7 +297,7 @@ async function grouper(sel, fournisseurs) {
   const dates = [...new Set(sel.map((l) => l.date_commande).filter(Boolean))];
   const r = await modale({
     titre: `Regrouper ${sel.length} ligne(s) en une commande`,
-    contenu: `<p class="aide">${sel.map((l) => `<span class="mono">${esc(l.asin)}</span> × ${l.quantite}`).join(' · ')}</p>
+    contenu: `<p class="aide">${sel.map((l) => `${asinLien(l.asin)} × ${l.quantite}`).join(' · ')}</p>
       <div class="champs">
         ${champ('numero_commande', 'N° de commande', { valeur: numeros.length === 1 ? numeros[0] : '' })}
         ${champ('date_commande', 'Date de commande', { type: 'date', valeur: dates.length === 1 ? dates[0] : '' })}

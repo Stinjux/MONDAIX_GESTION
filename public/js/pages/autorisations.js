@@ -1,4 +1,4 @@
-import { api, post, put, suppr, esc, date, badge, tableau, modale, champ, selecteur, tenter, references } from '../outils.js';
+import { api, post, put, suppr, esc, date, badge, tableau, modale, champ, selecteur, tenter, references, asinLien } from '../outils.js';
 import { rafraichir } from '../app.js';
 
 const TONS = { a_demander: 'alerte', demande_envoyee: 'info', documents_requis: 'alerte', approuve: 'ok', refuse: 'erreur' };
@@ -16,7 +16,7 @@ export async function pageAutorisations(zone) {
     ${tableau(
       ['ASIN', 'Titre', 'Statut', 'N° de cas', { t: 'Réponses Neo', classe: 'num' }, 'Confirmation', ''],
       visibles.map(
-        (a) => `<tr><td class="mono"><a href="#/produits/${a.asin}">${a.asin}</a></td><td>${esc(a.titre || '')}</td>
+        (a) => `<tr><td>${asinLien(a.asin)}</td><td>${esc(a.titre || '')}</td>
           <td>${a.dossier_id ? `<a href="#/dossiers/${a.dossier_id}">${badge(refs.statuts_dossier[a.statut], TONS[a.statut])}</a>` : badge('aucun dossier', 'alerte')}</td>
           <td class="mono">${esc(a.numero_cas || '—')}</td><td class="num">${a.reponses_neo}</td>
           <td>${a.confirme ? badge('confirmé', 'ok') : badge('non confirmé', 'alerte')}</td>
@@ -48,7 +48,7 @@ export async function pageDossier(zone, id) {
     ['Statut confirmé', d.statut_confirme ? 'oui' : 'non', d.statut_confirme ? 'ok' : 'partiel'],
   ];
   zone.innerHTML = `
-    <div class="entete"><div><a href="#/autorisations">← Autorisations</a><h1>Dossier #${d.id} · <span class="mono">${esc(d.asin)}</span></h1>
+    <div class="entete"><div><a href="#/autorisations">← Autorisations</a><h1>Dossier #${d.id} · ${asinLien(d.asin)}</h1>
       <p class="aide">${esc(d.titre || '')} · demande du ${date(d.date_demande)}</p></div>
       <div class="actions"><button id="modifier">Modifier</button><button class="danger" id="supprimer">Supprimer</button></div></div>
     <div class="chaine">${etapes.map(([n, det, e]) => `<div class="etape ${e}"><div class="nom">${esc(n)}</div><div class="det">${esc(det)}</div></div>`).join('')}</div>
@@ -60,7 +60,11 @@ export async function pageDossier(zone, id) {
         <td>${r.references_extraites.statut ? esc(refs.statuts_dossier[r.references_extraites.statut]) : '—'}</td>
         <td>${badge(r.mode_rapprochement === 'auto' ? 'auto (n° de cas)' : 'validé', 'ok')}</td></tr>`),
       'Aucune réponse. Les réponses arrivent dans « Neo · réponses ».',
-    )}`;
+    )}
+    ${d.emails_cas.length ? `<h2>Autres emails liés au cas ${esc(d.numero_cas)}</h2>
+    ${tableau(['Reçu', 'Boîte', 'Expéditeur', 'Objet'],
+      d.emails_cas.map((e) => `<tr><td>${date(e.date_reception)}</td><td>${e.source === 'gmail' ? 'Gmail' : 'Neo'}</td><td>${esc(e.expediteur || '')}</td>
+        <td><a href="#/emails/${e.source}?filtre=tous&email=${e.id}">${esc(e.sujet || '(sans objet)')}</a></td></tr>`))}` : ''}`;
   zone.querySelector('#modifier').onclick = async () => {
     const ok = await modale({
       titre: 'Modifier le dossier',

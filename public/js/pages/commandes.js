@@ -1,4 +1,4 @@
-import { api, post, put, suppr, esc, montant, date, badge, badgeComparaison, tableau, modale, champ, selecteur, selecteurTriEtat, tenter, toast, triEtat, references } from '../outils.js';
+import { api, post, put, suppr, esc, montant, date, badge, badgeComparaison, tableau, modale, champ, selecteur, selecteurTriEtat, tenter, toast, triEtat, references, asinLien } from '../outils.js';
 import { rafraichir } from '../app.js';
 
 function filtreUrl() {
@@ -123,7 +123,7 @@ export async function pageCommande(zone, id) {
     ${tableau(
       ['ASIN', 'Titre', { t: 'Qté', classe: 'num' }, { t: 'Coût unitaire HT (commande)', classe: 'num' }, 'Origine', ''],
       c.lignes.map(
-        (l) => `<tr><td class="mono"><a href="#/produits/${l.asin}">${l.asin}</a></td><td>${esc(l.titre || '')}</td>
+        (l) => `<tr><td>${asinLien(l.asin)}</td><td>${esc(l.titre || '')}</td>
           <td class="num">${l.quantite}</td><td class="num">${l.cout_unitaire_ht === null ? '<span class="aide">non connu</span>' : montant(l.cout_unitaire_ht)}</td>
           <td>${l.ligne_import_id ? `Sheets ligne ${l.numero_ligne}` : 'saisie'}</td>
           <td class="actions"><button class="petit" data-ligne="${l.id}">Modifier</button><button class="petit danger" data-suppr-ligne="${l.id}">Retirer</button></td></tr>`,
@@ -146,7 +146,7 @@ export async function pageCommande(zone, id) {
         (f) => `<tr><td>${esc(f.numero_facture || '—')}</td><td>${date(f.date_facture)}</td><td class="num">${montant(f.sous_total_ht)}</td>
           <td class="num">${montant(f.taxes)}</td><td class="num">${montant(f.livraison)}</td><td class="num">${montant(f.autres_frais)}</td>
           <td class="num"><strong>${montant(f.total_calcule)}</strong></td>
-          <td>${f.lignes.map((l) => `<span class="mono">${l.asin}</span> × ${l.quantite} @ ${montant(l.prix_unitaire_ht)}`).join('<br>') || '—'}</td>
+          <td>${f.lignes.map((l) => `${asinLien(l.asin)} × ${l.quantite} @ ${montant(l.prix_unitaire_ht)}`).join('<br>') || '—'}</td>
           <td><button class="petit danger" data-suppr-facture="${f.id}">Supprimer</button></td></tr>`,
       ),
       'Aucune facture.',
@@ -156,7 +156,7 @@ export async function pageCommande(zone, id) {
     <h2>Réceptions</h2>
     ${tableau(
       ['Date', 'Contenu', 'Notes', ''],
-      c.receptions.map((r) => `<tr><td>${date(r.date_reception)}</td><td>${r.lignes.map((l) => `<span class="mono">${l.asin}</span> × ${l.quantite}`).join(', ')}</td><td>${esc(r.notes || '')}</td>
+      c.receptions.map((r) => `<tr><td>${date(r.date_reception)}</td><td>${r.lignes.map((l) => `${asinLien(l.asin)} × ${l.quantite}`).join(', ')}</td><td>${esc(r.notes || '')}</td>
         <td><button class="petit danger" data-suppr-reception="${r.id}">Supprimer</button></td></tr>`),
       'Aucune réception.',
     )}
@@ -165,7 +165,7 @@ export async function pageCommande(zone, id) {
     <h2>Envois Amazon</h2>
     ${tableau(
       ['Envoi', 'Date', 'ASIN', { t: 'Qté', classe: 'num' }, 'Statut'],
-      c.envois.map((e) => `<tr><td><a href="#/envois/${e.envoi_id}">${esc(e.numero_envoi || '#' + e.envoi_id)}</a></td><td>${date(e.date_envoi)}</td><td class="mono">${e.asin}</td><td class="num">${e.quantite}</td><td>${esc(refs.statuts_envoi[e.statut])}</td></tr>`),
+      c.envois.map((e) => `<tr><td><a href="#/envois/${e.envoi_id}">${esc(e.numero_envoi || '#' + e.envoi_id)}</a></td><td>${date(e.date_envoi)}</td><td>${asinLien(e.asin)}</td><td class="num">${e.quantite}</td><td>${esc(refs.statuts_envoi[e.statut])}</td></tr>`),
       'Aucune unité de cette commande dans un envoi Amazon.',
     )}
 
@@ -181,7 +181,7 @@ export async function pageCommande(zone, id) {
 
     ${c.lignes_import.length ? `<h2>Lignes Google Sheets d’origine</h2>
     ${tableau(['Import · ligne', 'ASIN', 'Lien d’origine', { t: 'Qté', classe: 'num' }, { t: 'Total déclaré sur la ligne (commande)', classe: 'num' }, ''],
-      c.lignes_import.map((l) => `<tr><td>${l.import_id} · ${l.numero_ligne}</td><td class="mono">${esc(l.asin)}</td><td class="mono">${esc(l.lien_original || '')}</td>
+      c.lignes_import.map((l) => `<tr><td>${l.import_id} · ${l.numero_ligne}</td><td>${asinLien(l.asin)}</td><td class="mono">${esc(l.lien_original || '')}</td>
         <td class="num">${l.quantite}</td><td class="num">${montant(l.total_commande_declare)}</td><td><button class="petit" data-detacher="${l.id}">Détacher</button></td></tr>`))}` : ''}
   `;
 

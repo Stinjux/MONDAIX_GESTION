@@ -1,4 +1,4 @@
-import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, references } from '../outils.js';
+import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, references, asinLien } from '../outils.js';
 import { rafraichir } from '../app.js';
 import { lignesSaisie, brancherLignesSaisie, lireLignesSaisie } from './commandes.js';
 
@@ -37,7 +37,7 @@ export async function pageEnvoi(zone, id) {
       ['ASIN', 'Titre', { t: 'Qté', classe: 'num' }, 'Commande d’origine', ''],
       e.lignes.map((l) => {
         const options = [['', '— non identifiée —'], ...l.commandes_possibles.map((c) => [c.id, `${c.numero_commande || '#' + c.id} · reçues ${c.recues}/${c.commandees} · déjà envoyées ${c.envoyees}`])];
-        return `<tr><td class="mono"><a href="#/produits/${l.asin}">${l.asin}</a></td><td>${esc(l.titre || '')}</td><td class="num">${l.quantite}</td>
+        return `<tr><td>${asinLien(l.asin)}</td><td>${esc(l.titre || '')}</td><td class="num">${l.quantite}</td>
           <td>${selecteur(`cmd-${l.id}`, '', options, l.commande_id || '', `data-ligne="${l.id}"`)}
           ${!l.commande_id && l.commandes_possibles.length === 1 ? badge('1 commande possible : à confirmer', 'info') : ''}
           ${!l.commande_id && l.commandes_possibles.length > 1 ? badge(`${l.commandes_possibles.length} commandes possibles`, 'alerte') : ''}</td>

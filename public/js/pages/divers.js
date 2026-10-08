@@ -1,4 +1,4 @@
-import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, toast } from '../outils.js';
+import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, toast, definirDomaineAmazon } from '../outils.js';
 import { rafraichir } from '../app.js';
 
 export async function pageFournisseurs(zone) {
@@ -92,10 +92,22 @@ export async function pageParametres(zone) {
       <label><input type="checkbox" id="inclure-taxes" ${params.inclure_taxes ? 'checked' : ''}> Inclure les taxes payées dans le coût complet (désactivé si vous les récupérez)</label>
       <div class="actions" style="margin-top:10px">${champ('tolerance', 'Tolérance de rapprochement des montants ($)', { valeur: params.tolerance })}
         <button id="enregistrer-calculs" style="align-self:flex-end">Enregistrer</button></div>
+    </div>
+    <h2>Amazon</h2>
+    <div class="carte">
+      <p class="aide" style="margin-top:0">Site ouvert quand on clique sur un ASIN (page produit <span class="mono">/dp/ASIN</span>).</p>
+      <div class="actions">${champ('amazon_domaine', 'Site Amazon', { valeur: params.amazon_domaine || 'www.amazon.ca', attrs: 'placeholder="www.amazon.ca"' })}
+        <button id="enregistrer-amazon" style="align-self:flex-end">Enregistrer</button></div>
     </div>`;
   zone.querySelectorAll('[data-synchro]').forEach((b) => (b.onclick = () => synchroniser(b, b.dataset.synchro)));
   zone.querySelector('#enregistrer-jeton').onclick = async () => {
     if ((await tenter(() => put('/api/parametres', { webhook_token: zone.querySelector('#f-webhook_token').value }), 'Jeton enregistré.')) !== undefined) rafraichir();
+  };
+  zone.querySelector('#enregistrer-amazon').onclick = async () => {
+    const domaine = zone.querySelector('#f-amazon_domaine').value;
+    if ((await tenter(() => put('/api/parametres', { amazon_domaine: domaine }), 'Site Amazon enregistré.')) !== undefined) {
+      definirDomaineAmazon(domaine.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''));
+    }
   };
   zone.querySelector('#enregistrer-calculs').onclick = async () => {
     await tenter(() => put('/api/parametres', { inclure_taxes: zone.querySelector('#inclure-taxes').checked, tolerance: zone.querySelector('#f-tolerance').value }), 'Paramètres enregistrés.');

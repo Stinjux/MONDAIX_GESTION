@@ -143,3 +143,20 @@ export function lireFichierTexte(fichier) {
     lecteur.readAsText(fichier);
   });
 }
+
+let domaineAmazon = 'www.amazon.ca';
+export function definirDomaineAmazon(domaine) {
+  if (domaine) domaineAmazon = domaine;
+}
+export function urlAmazon(asin) {
+  return `https://${domaineAmazon}/dp/${encodeURIComponent(asin)}`;
+}
+
+/** ASIN cliquable : ouvre la page Amazon (nouvel onglet) ; « fiche » ouvre la fiche ASIN interne. */
+export function asinLien(asin, { fiche = true } = {}) {
+  if (!asin) return '<span class="mono">?</span>';
+  const a = esc(asin);
+  return `<span class="asin"><a class="mono" href="${esc(urlAmazon(asin))}" target="_blank" rel="noopener noreferrer" title="Ouvrir sur Amazon">${a}<span aria-hidden="true"> ↗</span></a>${
+    fiche ? ` <a class="asin-fiche" href="#/asins/${a}" title="Fiche ASIN : tout l’historique">fiche</a>` : ''
+  }</span>`;
+}

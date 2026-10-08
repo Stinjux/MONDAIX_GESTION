@@ -1,4 +1,4 @@
-import { api, post, esc, montant, date, badge, tableau, modale, champ, selecteur, selecteurTriEtat, tenter, toast, references, lireFichierTexte } from '../outils.js';
+import { api, post, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, selecteurTriEtat, tenter, toast, references, lireFichierTexte, asinLien } from '../outils.js';
 import { rafraichir } from '../app.js';
 import { synchroniser } from './divers.js';
 
@@ -11,7 +11,9 @@ const STATUTS = {
 };
 
 export async function pageEmails(zone, source) {
-  const filtre = new URLSearchParams(location.hash.split('?')[1] || '').get('filtre') || 'a_traiter';
+  const params = new URLSearchParams(location.hash.split('?')[1] || '');
+  const filtre = params.get('filtre') || 'a_traiter';
+  const emailAOuvrir = Number(params.get('email')) || null;
   const [emails, sources, refs] = await Promise.all([api(`/api/emails?source=${source}&statut=${filtre === 'tous' ? '' : filtre}`), api('/api/emails/sources'), references()]);
   const src = sources.find((s) => s.source === source);
   const estGmail = source === 'gmail';
@@ -28,7 +30,7 @@ export async function pageEmails(zone, source) {
     <div class="onglets">${[['a_traiter', `À traiter (${src.a_traiter})`], ['valide', 'Rapprochés'], ['ignore', 'Ignorés'], ['tous', 'Tous']]
       .map(([f, t]) => `<a href="#/emails/${source}?filtre=${f}" class="${f === filtre ? 'actif' : ''}">${t}</a>`).join('')}</div>
     ${tableau(
-      ['Reçu', 'Expéditeur', 'Sujet', 'Références détectées', 'Rapprochement', ''],
+      ['Reçu', 'Expéditeur', 'Sujet', 'Références détectées', 'ASIN / cas liés', 'Rapprochement', ''],
       emails.map((e) => ligne(e, estGmail, refs)),
       'Aucun email.',
     )}`;
@@ -62,6 +64,19 @@ export async function pageEmails(zone, source) {
     }
   };
   zone.querySelectorAll('[data-detail]').forEach((b) => (b.onclick = () => detail(Number(b.dataset.detail), refs)));
+  zone.querySelectorAll('[data-lier]').forEach((b) => {
+    b.onclick = async () => {
+      const corps = JSON.parse(b.dataset.lier);
+      if (await tenter(() => post(`/api/emails/${b.dataset.email}/liens`, corps), 'Lien ajouté.')) rafraichir();
+    };
+  });
+  zone.querySelectorAll('[data-delier]').forEach((b) => {
+    b.onclick = async () => {
+      if ((await tenter(() => suppr(`/api/email-liens/${b.dataset.delier}`), 'Lien retiré.')) !== undefined) rafraichir();
+    };
+  });
+  zone.querySelectorAll('[data-nouveau-lien]').forEach((b) => (b.onclick = () => nouveauLien(Number(b.dataset.nouveauLien))));
+  if (emailAOuvrir) detail(emailAOuvrir, refs);
   zone.querySelectorAll('[data-valider]').forEach((b) => {
     b.onclick = async () => {
       const corps = JSON.parse(b.dataset.valider);
@@ -85,7 +100,7 @@ function ligne(e, estGmail, refs) {
   const r = e.references_extraites;
   const [t, ton] = STATUTS[e.statut_rapprochement];
   const refsTxt = estGmail
-    ? [r.numerosCommande?.length ? `n° ${r.numerosCommande.join(', ')}` : '', r.montantTotal != null ? `total ${montant(r.montantTotal)}` : '', r.domaine || ''].filter(Boolean).join(' · ')
+    ? [r.numerosCommande?.length ? `n° ${r.numerosCommande.join(', ')}` : '', r.montantTotal != null ? `total ${montant(r.montantTotal)}` : '', r.domaine || '', r.asins?.length ? r.asins.join(', ') : ''].filter(Boolean).join(' · ')
     : [r.numerosCas?.length ? `cas ${r.numerosCas.join(', ')}` : '', r.asins?.length ? r.asins.join(', ') : '', r.statut ? `→ ${refs.statuts_dossier[r.statut]}` : ''].filter(Boolean).join(' · ');
   const cible = estGmail
     ? e.commande_id ? `<a href="#/commandes/${e.commande_id}">${esc(e.numero_commande || 'commande #' + e.commande_id)}</a>` : ''
@@ -102,8 +117,35 @@ function ligne(e, estGmail, refs) {
       : '';
   const appliquer = !estGmail && e.dossier_id && r.statut ? `<button class="petit" data-email="${e.id}" data-statut="${r.statut}">Appliquer « ${esc(refs.statuts_dossier[r.statut])} »</button>` : '';
   return `<tr><td>${date(e.date_reception)}</td><td>${esc(e.expediteur || '')}</td><td>${esc(e.sujet || '')}</td><td>${esc(refsTxt || '—')}</td>
+    <td>${celluleLiens(e)}</td>
     <td>${badge(t, ton)}${e.mode_rapprochement === 'auto' ? ' ' + badge('auto') : ''} ${cible}<div class="actions" style="margin-top:4px">${propositions}${appliquer}</div></td>
     <td><button class="petit" data-detail="${e.id}">Ouvrir</button></td></tr>`;
+}
+
+/** Liens ASIN / cas de l'email, suggestions issues des références détectées et ajout manuel. */
+function celluleLiens(e) {
+  const r = e.references_extraites;
+  const liens = e.liens || [];
+  const dejaLie = (type, valeur) => liens.some((l) => l.type === type && l.valeur === valeur);
+  const puces = liens.map(
+    (l) => `<div class="lien-email">${l.type === 'asin' ? asinLien(l.valeur) : `<span class="mono">cas ${esc(l.valeur)}</span>`}${l.mode === 'auto' ? ' ' + badge('auto') : ''}
+      <button class="petit" data-delier="${l.id}" title="Retirer ce lien" aria-label="Retirer ce lien">×</button></div>`,
+  );
+  const suggestions = [
+    ...(r.asins || []).filter((a) => !dejaLie('asin', a)).map((a) => ({ type: 'asin', valeur: a, libelle: a })),
+    ...(r.numerosCas || []).filter((c) => !dejaLie('cas', c)).map((c) => ({ type: 'cas', valeur: c, libelle: `cas ${c}` })),
+  ].map((s) => `<button class="petit" data-email="${e.id}" data-lier='${esc(JSON.stringify({ type: s.type, valeur: s.valeur }))}' title="Lier cet email">+ ${esc(s.libelle)}</button>`);
+  return `${puces.join('')}<div class="actions" style="margin-top:4px">${suggestions.join('')}<button class="petit" data-nouveau-lien="${e.id}">+ Lier</button></div>`;
+}
+
+async function nouveauLien(id) {
+  const ok = await modale({
+    titre: 'Lier l’email à un ASIN ou à un cas',
+    contenu: `<div class="champs">${selecteur('type', 'Type', [['asin', 'ASIN'], ['cas', 'N° de cas Amazon']])}${champ('valeur', 'ASIN ou numéro de cas', { attrs: 'required placeholder="B0… ou 12345678901"' })}</div>`,
+    libelleValider: 'Lier',
+    valider: (d) => post(`/api/emails/${id}/liens`, d),
+  });
+  if (ok) rafraichir();
 }
 
 async function detail(id, refs) {
@@ -117,11 +159,16 @@ async function detail(id, refs) {
     titre: e.sujet || 'Email',
     contenu: `<p class="aide">${esc(e.expediteur || '')} · ${date(e.date_reception)} · saisi par ${esc(e.mode_saisie)}</p>
       <pre class="corps">${esc(e.corps || '')}</pre>
+      <h3>ASIN et cas liés</h3>
+      <p>${e.liens.length ? e.liens.map((l) => (l.type === 'asin' ? asinLien(l.valeur) : `<span class="mono">cas ${esc(l.valeur)}</span>`)).join(' · ') : '<span class="aide">Aucun.</span>'}</p>
+      <div class="champs">${selecteur('lien_type', 'Ajouter un lien', [['asin', 'ASIN'], ['cas', 'N° de cas Amazon']])}${champ('lien_valeur', 'ASIN ou numéro de cas (facultatif)')}</div>
       <h3>${estGmail ? 'Rattacher à une commande' : 'Rattacher à un dossier d’autorisation'}</h3>
       <div class="champs">${selecteur('cible', estGmail ? 'Commande' : 'Dossier', [['', '—'], ...options], estGmail ? e.commande_id || '' : e.dossier_id || '')}
-      ${selecteur('action', 'Action', [['valider', 'Valider le rattachement'], ['dissocier', 'Dissocier'], ['ignorer', 'Ignorer cet email'], ...(estGmail && !e.commande_id ? [['creer', 'Créer une commande depuis cet email']] : [])])}</div>`,
+      ${selecteur('action', 'Action', [['aucune', 'Ne pas changer le rattachement'], ['valider', 'Valider le rattachement'], ['dissocier', 'Dissocier'], ['ignorer', 'Ignorer cet email'], ...(estGmail && !e.commande_id ? [['creer', 'Créer une commande depuis cet email']] : [])])}</div>`,
     libelleValider: 'Appliquer',
     valider: async (d) => {
+      if (d.lien_valeur.trim()) await post(`/api/emails/${id}/liens`, { type: d.lien_type, valeur: d.lien_valeur });
+      if (d.action === 'aucune') return true;
       if (d.action === 'dissocier') return post(`/api/emails/${id}/dissocier`);
       if (d.action === 'ignorer') return post(`/api/emails/${id}/ignorer`);
       if (d.action === 'creer') return 'creer';
@@ -143,7 +190,7 @@ async function creerCommande(e) {
       ${selecteur('fournisseur_id', 'Fournisseur', [['', '— à préciser —'], ...fournisseurs.map((f) => [f.id, f.nom])])}
       ${champ('total_declare', 'Total déclaré', { valeur: r.montantTotal ?? '' })}
       ${selecteurTriEtat('total_inclut_taxes', 'Inclut les taxes ?', null)}${selecteurTriEtat('total_inclut_livraison', 'Inclut la livraison ?', null)}</div>
-      ${r.asins?.length ? `<p class="aide">ASIN cités : ${esc(r.asins.join(', '))} (ajoutez les lignes ensuite).</p>` : ''}`,
+      ${r.asins?.length ? `<p class="aide">ASIN cités : ${r.asins.map((x) => asinLien(x)).join(', ')} (ajoutez les lignes ensuite).</p>` : ''}`,
     libelleValider: 'Créer',
     valider: (d) => post(`/api/emails/${e.id}/creer-commande`, d),
   });

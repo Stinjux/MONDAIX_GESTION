@@ -152,6 +152,17 @@ CREATE TABLE IF NOT EXISTS emails (
   CHECK (source = 'neo' OR dossier_id IS NULL)
 );
 
+-- Liens libres entre un email (Gmail ou Neo) et un ASIN ou un numéro de cas Amazon.
+CREATE TABLE IF NOT EXISTS email_liens (
+  id INTEGER PRIMARY KEY,
+  email_id INTEGER NOT NULL REFERENCES emails(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('asin', 'cas')),
+  valeur TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'manuel' CHECK (mode IN ('auto', 'manuel')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (email_id, type, valeur)
+);
+
 CREATE TABLE IF NOT EXISTS receptions (
   id INTEGER PRIMARY KEY,
   commande_id INTEGER NOT NULL REFERENCES commandes(id) ON DELETE CASCADE,
@@ -228,12 +239,14 @@ CREATE INDEX IF NOT EXISTS idx_commande_lignes_commande ON commande_lignes(comma
 CREATE INDEX IF NOT EXISTS idx_couts_asin ON couts_achat(asin);
 CREATE INDEX IF NOT EXISTS idx_emails_source ON emails(source, statut_rapprochement);
 CREATE INDEX IF NOT EXISTS idx_dossiers_asin ON dossiers_autorisation(asin);
+CREATE INDEX IF NOT EXISTS idx_email_liens_valeur ON email_liens(type, valeur);
 `;
 
 const PARAMETRES_DEFAUT = {
   'email.webhook_token': '',
   'couts.inclure_taxes': '0',
   'rapprochement.tolerance': '0.02',
+  'amazon.domaine': 'www.amazon.ca',
 };
 
 export function ouvrirBase(chemin = cheminBase()) {

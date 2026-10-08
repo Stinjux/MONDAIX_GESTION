@@ -59,7 +59,9 @@ main { flex: 1; padding: 20px 24px 60px; min-width: 0; }
 .carte { background: var(--surface); border: 1px solid var(--bord); border-radius: var(--rayon); padding: 14px 16px; margin-bottom: 14px; }
 .grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
 .tuile { background: var(--surface); border: 1px solid var(--bord); border-radius: var(--rayon); padding: 12px 14px; display: block; color: var(--texte); }
-.tuile:hover { border-color: var(--accent); text-decoration: none; }
+a.tuile:hover { border-color: var(--accent); text-decoration: none; }
+h1 .asin .mono { font-size: 20px; }
+h1 .asin { font-weight: 700; }
 .tuile .valeur { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .tuile .libelle { color: var(--doux); font-size: 12px; }
 .tuile.alerte .valeur { color: var(--alerte); }
@@ -117,6 +119,17 @@ dialog h2 { margin-top: 0; }
 #toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 20; }
 .toast { background: var(--texte); color: var(--fond); padding: 10px 14px; border-radius: 8px; max-width: 420px; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
 .toast.erreur { background: var(--erreur); color: #fff; }
+.lien-email { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; white-space: nowrap; }
+.asin { white-space: nowrap; }
+.asin-fiche { font-size: 11px; color: var(--doux); border: 1px solid var(--bord); border-radius: 4px; padding: 0 4px; }
+.asin-fiche:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
+.segmente { display: inline-flex; border: 1px solid var(--bord); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.segmente button { border: 0; border-radius: 0; padding: 6px 14px; }
+.segmente button + button { border-left: 1px solid var(--bord); }
+.segmente button.actif { background: var(--accent-doux); color: var(--accent); font-weight: 600; }
+.tuile.indicateur .libelle { font-size: 12.5px; }
+.tuile.indicateur .valeur { margin: 2px 0; }
+.variation { font-size: 12px; color: var(--doux); font-variant-numeric: tabular-nums; }
 .vide { color: var(--doux); padding: 14px; text-align: center; }
 .deux-colonnes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 pre.corps { white-space: pre-wrap; background: var(--neutre-doux); padding: 10px; border-radius: 6px; max-height: 300px; overflow: auto; font-size: 12.5px; }

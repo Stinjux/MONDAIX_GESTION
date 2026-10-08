@@ -1,8 +1,9 @@
-import { esc } from './outils.js';
+import { esc, references, definirDomaineAmazon } from './outils.js';
 import { pageTableauDeBord } from './pages/tableau.js';
 import { pageImportSheets } from './pages/importSheets.js';
 import { pageCommandes, pageCommande } from './pages/commandes.js';
-import { pageProduits, pageProduit, pageDepenses } from './pages/produits.js';
+import { pageDepenses } from './pages/produits.js';
+import { pageAsins, pageAsin } from './pages/asins.js';
 import { pageEnvois, pageEnvoi } from './pages/envois.js';
 import { pageAutorisations, pageDossier } from './pages/autorisations.js';
 import { pageEmails } from './pages/emails.js';
@@ -14,8 +15,10 @@ const ROUTES = [
   [/^commandes$/, pageCommandes],
   [/^commandes\/(\d+)$/, pageCommande],
   [/^factures$/, pageFactures],
-  [/^produits$/, pageProduits],
-  [/^produits\/([A-Z0-9]+)$/, pageProduit],
+  [/^asins$/, pageAsins],
+  [/^asins\/([A-Za-z0-9]+)$/, pageAsin],
+  [/^produits$/, pageAsins],
+  [/^produits\/([A-Za-z0-9]+)$/, pageAsin],
   [/^depenses$/, pageDepenses],
   [/^envois$/, pageEnvois],
   [/^envois\/(\d+)$/, pageEnvoi],
@@ -35,6 +38,9 @@ export async function afficher() {
     a.classList.toggle('actif', r === '' ? chemin === '' : chemin === r || chemin.startsWith(r + '/'));
   }
   document.getElementById('nav').classList.remove('ouvert');
+  // Une fenêtre restée ouverte ne doit pas bloquer la nouvelle page.
+  const modale = document.getElementById('modale');
+  if (modale.open) modale.close();
   for (const [re, page] of ROUTES) {
     const m = chemin.match(re);
     if (!m) continue;
@@ -53,4 +59,7 @@ export const rafraichir = () => afficher();
 
 window.addEventListener('hashchange', afficher);
 document.getElementById('menu-mobile').onclick = () => document.getElementById('nav').classList.toggle('ouvert');
-afficher();
+references()
+  .then((r) => definirDomaineAmazon(r.amazon_domaine))
+  .catch(() => {})
+  .finally(afficher);

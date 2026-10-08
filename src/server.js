@@ -16,6 +16,8 @@ import * as autorisations from './services/autorisations.js';
 import * as emails from './services/emails.js';
 import * as tdb from './services/tableauDeBord.js';
 import * as synchro from './services/synchroEmail.js';
+import * as asins from './services/asins.js';
+import * as stats from './services/statistiques.js';
 
 const DOSSIER_PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -30,6 +32,7 @@ export function creerRoutes(db) {
 
   // Tableau de bord
   r('GET', '/api/tableau-de-bord', () => tdb.tableauDeBord(db));
+  r('GET', '/api/statistiques', ({ q }) => stats.statistiques(db, q.get('periode') || '30j'));
 
   // Fournisseurs
   r('GET', '/api/fournisseurs', () => fournisseurs.listerFournisseurs(db));
@@ -55,12 +58,8 @@ export function creerRoutes(db) {
   // Inventaire et coûts
   r('POST', '/api/imports/inventaire/analyser', ({ corps }) => inventaire.analyserInventaire(corps.texte));
   r('POST', '/api/imports/inventaire', ({ corps }) => inventaire.importerInventaire(db, corps));
-  r('GET', '/api/produits', () => tdb.listerProduits(db));
-  r('GET', '/api/produits/:asin', ({ p }) => {
-    const fiche = tdb.ficheProduit(db, p.asin);
-    if (!fiche) throw new ErreurMetier('ASIN inconnu.', 404);
-    return { ...fiche, historique: couts.historiqueCouts(db, p.asin), cout_complet: couts.coutComplet(db, p.asin) };
-  });
+  r('GET', '/api/produits', () => asins.listerAsins(db));
+  r('GET', '/api/produits/:asin', ({ p }) => asins.ficheAsin(db, p.asin));
   r('PUT', '/api/produits/:asin', ({ p, corps }) => {
     db.prepare("UPDATE produits SET titre = ?, sku = ?, updated_at = datetime('now') WHERE asin = ?").run(corps.titre || null, corps.sku || null, p.asin);
   });
@@ -121,7 +120,12 @@ export function creerRoutes(db) {
     emails.relancerRapprochements(db, 'neo');
     return { id };
   });
-  r('GET', '/api/dossiers/:id', ({ p }) => autorisations.lireDossier(db, +p.id));
+  r('GET', '/api/dossiers/:id', ({ p }) => {
+    const d = autorisations.lireDossier(db, +p.id);
+    const reponses = new Set(d.reponses.map((r) => r.id));
+    const parCas = d.numero_cas ? emails.emailsPourCas(db, d.numero_cas).filter((e) => !reponses.has(e.id)) : [];
+    return { ...d, emails_cas: parCas };
+  });
   r('PUT', '/api/dossiers/:id', ({ p, corps }) => {
     autorisations.modifierDossier(db, +p.id, corps);
     emails.relancerRapprochements(db, 'neo');
@@ -155,6 +159,9 @@ export function creerRoutes(db) {
   r('POST', '/api/emails/:id/valider', ({ p, corps }) => emails.validerRapprochement(db, +p.id, corps));
   r('POST', '/api/emails/:id/dissocier', ({ p }) => emails.dissocierEmail(db, +p.id));
   r('POST', '/api/emails/:id/ignorer', ({ p }) => emails.ignorerEmail(db, +p.id));
+  r('POST', '/api/emails/:id/liens', ({ p, corps }) => emails.lierEmail(db, +p.id, corps));
+  r('DELETE', '/api/email-liens/:id', ({ p }) => emails.delierEmail(db, +p.id));
+  r('GET', '/api/cas/:numero/emails', ({ p }) => emails.emailsPourCas(db, p.numero));
   r('POST', '/api/emails/:id/statut', ({ p, corps }) => emails.appliquerStatutNeo(db, +p.id, corps.statut));
   r('POST', '/api/emails/:id/creer-commande', ({ p, corps }) => ({ id: emails.creerCommandeDepuisEmail(db, +p.id, corps) }));
 
@@ -163,11 +170,17 @@ export function creerRoutes(db) {
     inclure_taxes: lireParametre(db, 'couts.inclure_taxes') === '1',
     tolerance: Number(lireParametre(db, 'rapprochement.tolerance')),
     webhook_configure: Boolean(lireParametre(db, 'email.webhook_token')),
+    amazon_domaine: lireParametre(db, 'amazon.domaine'),
   }));
   r('PUT', '/api/parametres', ({ corps }) => {
     if (corps.inclure_taxes !== undefined) ecrireParametre(db, 'couts.inclure_taxes', corps.inclure_taxes ? '1' : '0');
     if (corps.tolerance !== undefined) ecrireParametre(db, 'rapprochement.tolerance', String(Math.max(0, Number(corps.tolerance) || 0)));
     if (corps.webhook_token !== undefined) ecrireParametre(db, 'email.webhook_token', String(corps.webhook_token || ''));
+    if (corps.amazon_domaine !== undefined) {
+      const d = String(corps.amazon_domaine).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      if (!/^(www\.)?amazon\.[a-z]{2,3}(\.[a-z]{2})?$/.test(d)) throw new ErreurMetier('Domaine Amazon invalide (ex. www.amazon.ca).');
+      ecrireParametre(db, 'amazon.domaine', d);
+    }
   });
 
   r('GET', '/api/journal', ({ q }) =>
@@ -179,6 +192,8 @@ export function creerRoutes(db) {
     types_depense: couts.TYPES_DEPENSE,
     sources_cout: couts.LIBELLES_SOURCE_COUT,
     sources_email: emails.SOURCES_EMAIL,
+    periodes: stats.PERIODES,
+    amazon_domaine: lireParametre(db, 'amazon.domaine') || 'www.amazon.ca',
   }));
 
   return routes;
