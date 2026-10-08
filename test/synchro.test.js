@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { ouvrirBase } from '../src/db.js';
-import { configSource, correspondFiltre, synchroniserSource, etatSynchro } from '../src/services/synchroEmail.js';
+import { configSource, correspondFiltre, synchroniserSource, etatSynchro, indicesGmail } from '../src/services/synchroEmail.js';
 import { listerEmails } from '../src/services/emails.js';
 import { creerCommande } from '../src/services/commandes.js';
 import { creerControleAcces, routePublique } from '../src/lib/acces.js';
@@ -151,4 +151,13 @@ test('Railway : la base doit être sur le volume persistant', () => {
   assert.match(verifierStockage({ RAILWAY_ENVIRONMENT: 'production' }, '/app/data/mondaix.sqlite'), /Aucun volume/);
   assert.equal(verifierStockage({ RAILWAY_ENVIRONMENT: 'production', RAILWAY_VOLUME_MOUNT_PATH: '/app/data' }, '/app/data/mondaix.sqlite'), null);
   assert.match(verifierStockage({ RAILWAY_ENVIRONMENT: 'production', RAILWAY_VOLUME_MOUNT_PATH: '/data' }, '/app/data/mondaix.sqlite'), /pas sur le volume/);
+});
+
+test('indices Gmail en cas de refus, sans exposer le mot de passe', () => {
+  assert.deepEqual(indicesGmail(configSource('gmail', { GMAIL_UTILISATEUR: 'moi@gmail.com', GMAIL_MOT_DE_PASSE: 'abcd efgh ijkl mnop' })), []);
+  const i = indicesGmail(configSource('gmail', { GMAIL_UTILISATEUR: 'moi', GMAIL_MOT_DE_PASSE: 'MonMotDePasse!' }));
+  assert.match(i.join(), /adresse complète/);
+  assert.match(i.join(), /14 caractère/);
+  assert.ok(!i.join().includes('MonMotDePasse'));
+  assert.match(indicesGmail(configSource('gmail', { GMAIL_UTILISATEUR: 'a@b.com', GMAIL_MOT_DE_PASSE: '"abcdefghijklmnop"' })).join(), /guillemets/);
 });

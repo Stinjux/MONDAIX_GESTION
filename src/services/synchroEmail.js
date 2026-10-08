@@ -100,10 +100,20 @@ function creerClientImap(config) {
   return client;
 }
 
-function messageErreur(e) {
+/** Indices sur les identifiants Gmail, sans jamais révéler le mot de passe. */
+export function indicesGmail(config) {
+  const indices = [];
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(config.utilisateur)) indices.push('GMAIL_UTILISATEUR doit être l’adresse complète (ex. nom@gmail.com)');
+  if (/^["']|["']$/.test(config.motDePasse)) indices.push('GMAIL_MOT_DE_PASSE contient des guillemets : retirez-les');
+  else if (config.motDePasse.length !== 16) indices.push(`GMAIL_MOT_DE_PASSE fait ${config.motDePasse.length} caractère(s) sans les espaces, alors qu’un mot de passe d’application Google en compte 16`);
+  return indices;
+}
+
+function messageErreur(e, config) {
   if (e.authenticationFailed) {
     const detail = e.responseText ? ` Réponse du serveur : « ${e.responseText} »` : '';
-    return `Identifiants refusés par le serveur (vérifiez l’adresse et le mot de passe d’application).${detail}`;
+    const indices = config?.source === 'gmail' ? indicesGmail(config) : [];
+    return `Identifiants refusés par le serveur (vérifiez l’adresse et le mot de passe d’application).${detail}${indices.length ? ` À vérifier : ${indices.join(' ; ')}.` : ''}`;
   }
   if (e.code === 'ENOTFOUND') return 'Serveur IMAP introuvable (vérifiez le nom du serveur).';
   if (e.code === 'ECONNREFUSED' || e.code === 'ETIMEDOUT') return 'Connexion au serveur IMAP impossible.';
@@ -188,7 +198,7 @@ export async function synchroniserSource(db, source, { config = configSource(sou
     await client.logout();
     return bilan;
   } catch (e) {
-    const message = messageErreur(e);
+    const message = messageErreur(e, config);
     ecrireEtat(db, source, { ...etat, derniere_synchro: maintenant, derniere_erreur: message });
     try {
       client.close?.();
