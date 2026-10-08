@@ -162,3 +162,46 @@ test('dépenses : factures enregistrées seules comptées, sans double comptage 
   assert.equal(i.depenses.precedent, 23);
   assert.deepEqual([i.commandes.courant, i.unites_commandees.courant], [2, 9]);
 });
+
+test('dépense par ASIN : part de chaque facture au prorata du HT, frais compris, sans double comptage', async () => {
+  const { depensesFacturesParAsin, modifierLignesFacture, ajouterLigneFacture, retirerLigneFacture } = await import('../src/services/commandes.js');
+  // Facture à deux ASIN : 100 $ HT (A) + 300 $ HT (B), total 460 $ (taxes et livraison comprises)
+  creerFactureSeule(db, {
+    numero_facture: 'F-1', date_facture: '2026-09-01', sous_total_ht: 400, taxes: 50, livraison: 10, total: 460,
+    lignes: [{ asin: 'B0AAAAAAA1', quantite: 10, prix_unitaire_ht: 10 }, { asin: 'B0AAAAAAA2', quantite: 20, prix_unitaire_ht: 15 }],
+  });
+  // Facture sans article associé : ne compte pour aucun ASIN tant qu'elle n'est pas associée
+  const f2 = creerFactureSeule(db, { numero_facture: 'F-2', date_facture: '2026-09-05', total: 115 });
+  let d = depensesFacturesParAsin(db);
+  assert.deepEqual(d.get('B0AAAAAAA1'), { montant: 115, ht: 100, frais: 15, unites: 10, nb_factures: 1, estimee: false, cout_moyen_unite: 11.5 });
+  assert.equal(d.get('B0AAAAAAA2').montant, 345);
+  assert.equal(d.get('B0AAAAAAA1').montant + d.get('B0AAAAAAA2').montant, 460, 'la facture est répartie, jamais comptée deux fois');
+
+  // Association après coup depuis la fiche ASIN
+  ajouterLigneFacture(db, f2.id, { asin: 'B0AAAAAAA1', quantite: 5, prix_unitaire_ht: 20 });
+  d = depensesFacturesParAsin(db);
+  assert.equal(d.get('B0AAAAAAA1').montant, 230);
+  assert.equal(d.get('B0AAAAAAA1').nb_factures, 2);
+  const fiche = ficheAsin(db, 'B0AAAAAAA1');
+  assert.equal(fiche.depenses_factures.montant, 230);
+  assert.deepEqual(fiche.factures.map((f) => f.part_asin.montant).sort(), [115, 115]);
+  assert.equal(listerAsins(db).find((p) => p.asin === 'B0AAAAAAA1').depenses_factures.montant, 230);
+  assert.equal(listerAsins(db).find((p) => p.asin === 'B0AAAAAAA2').depenses_factures.nb_factures, 1);
+
+  // Article sans prix : part estimée selon les quantités
+  modifierLignesFacture(db, f2.id, [{ asin: 'B0AAAAAAA1', quantite: 1 }, { asin: 'B0AAAAAAA3', quantite: 4 }]);
+  d = depensesFacturesParAsin(db);
+  assert.equal(d.get('B0AAAAAAA3').montant, 92);
+  assert.equal(d.get('B0AAAAAAA3').estimee, true);
+
+  // Sous-total plus grand que les articles associés : un article non associé ne gonfle pas la part
+  creerFactureSeule(db, { numero_facture: 'F-3', sous_total_ht: 200, total: 230, lignes: [{ asin: 'B0AAAAAAA4', quantite: 2, prix_unitaire_ht: 50 }] });
+  assert.equal(depensesFacturesParAsin(db).get('B0AAAAAAA4').montant, 115);
+
+  // Retirer l'article : la facture reste, l'historique des coûts aussi
+  const ligne = db.prepare("SELECT id FROM facture_lignes WHERE asin = 'B0AAAAAAA4'").get();
+  retirerLigneFacture(db, ligne.id);
+  assert.equal(depensesFacturesParAsin(db).has('B0AAAAAAA4'), false);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM factures WHERE numero_facture = 'F-3'").get().n, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM couts_achat WHERE asin = 'B0AAAAAAA4'").get().n, 1);
+});

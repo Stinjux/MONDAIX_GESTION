@@ -101,6 +101,9 @@ export function creerRoutes(db) {
   r('POST', '/api/factures', ({ corps }) => commandes.creerFacture(db, corps));
   r('PUT', '/api/factures/:id/commande', ({ p, corps }) => commandes.rattacherFacture(db, +p.id, corps.commande_id ? +corps.commande_id : null));
   r('DELETE', '/api/factures/:id', ({ p }) => commandes.supprimerFacture(db, +p.id));
+  r('PUT', '/api/factures/:id/lignes', ({ p, corps }) => commandes.modifierLignesFacture(db, +p.id, corps.lignes));
+  r('POST', '/api/factures/:id/lignes', ({ p, corps }) => commandes.ajouterLigneFacture(db, +p.id, corps));
+  r('DELETE', '/api/facture-lignes/:id', ({ p }) => commandes.retirerLigneFacture(db, +p.id));
 
   // Factures déposées (PDF / image) et extraction
   r('GET', '/api/factures/documents', ({ q }) => ({

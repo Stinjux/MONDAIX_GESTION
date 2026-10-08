@@ -154,19 +154,117 @@ export function totalFacture(f) {
   return arrondir((f.sous_total_ht || 0) + (f.taxes || 0) + (f.livraison || 0) + (f.autres_frais || 0));
 }
 
-export function creerFacture(db, f) {
-  const montants = {};
-  for (const cle of ['sous_total_ht', 'taxes', 'livraison', 'autres_frais', 'total']) {
-    montants[cle] = f[cle] === '' || f[cle] == null ? null : parserMontant(f[cle]);
-  }
-  if (montants.total === null && montants.sous_total_ht === null) throw new ErreurMetier('Indiquez au moins le sous-total HT ou le total de la facture.');
-  const lignes = (f.lignes || []).filter((l) => l.asin).map((l, i) => {
+/** Lignes de facture saisies → { asin, quantite, prix } validés (les lignes sans ASIN sont ignorées). */
+function validerLignesFacture(lignes) {
+  return (lignes || []).filter((l) => l.asin && String(l.asin).trim()).map((l, i) => {
     const asin = normaliserAsin(l.asin);
     if (!asin) throw new ErreurMetier(`Ligne ${i + 1} : ASIN invalide.`);
     const quantite = parserQuantite(l.quantite);
     if (!quantite) throw new ErreurMetier(`Ligne ${i + 1} : quantité invalide.`);
     return { asin, quantite, prix: l.prix_unitaire_ht === '' || l.prix_unitaire_ht == null ? null : parserMontant(l.prix_unitaire_ht) };
   });
+}
+
+function insererLignesFacture(db, facture, lignes) {
+  for (const l of lignes) {
+    assurerProduit(db, l.asin);
+    db.prepare('INSERT INTO facture_lignes (facture_id, asin, quantite, prix_unitaire_ht) VALUES (?, ?, ?, ?)').run(facture.id, l.asin, l.quantite, l.prix);
+    if (l.prix !== null) {
+      ajouterCout(db, { asin: l.asin, montant: l.prix, source: 'facture', reference: facture.numero_facture || `facture #${facture.id}`, factureId: facture.id, commandeId: facture.commande_id });
+    }
+  }
+}
+
+/**
+ * Remplace les articles (ASIN) d'une facture déjà enregistrée. L'historique des coûts n'est
+ * jamais effacé : un nouveau prix s'y ajoute (écart signalé), un article retiré y reste.
+ */
+export function modifierLignesFacture(db, id, lignesSaisies) {
+  const f = db.prepare('SELECT * FROM factures WHERE id = ?').get(id);
+  if (!f) throw new ErreurMetier('Facture introuvable.', 404);
+  const lignes = validerLignesFacture(lignesSaisies);
+  return transaction(db, () => {
+    const avant = db.prepare('SELECT asin, quantite, prix_unitaire_ht FROM facture_lignes WHERE facture_id = ? ORDER BY id').all(id);
+    db.prepare('DELETE FROM facture_lignes WHERE facture_id = ?').run(id);
+    insererLignesFacture(db, f, lignes);
+    journaliser(db, 'facture', id, 'articles', { avant, apres: lignes });
+    return { id, lignes: lignes.length };
+  });
+}
+
+/** Associe un ASIN à une facture existante (ajout d'un article). */
+export function ajouterLigneFacture(db, id, ligne) {
+  const existantes = db.prepare('SELECT asin, quantite, prix_unitaire_ht FROM facture_lignes WHERE facture_id = ? ORDER BY id').all(id);
+  if (!validerLignesFacture([ligne]).length) throw new ErreurMetier('Indiquez l’ASIN.');
+  return modifierLignesFacture(db, id, [...existantes, ligne]);
+}
+
+export function retirerLigneFacture(db, ligneId) {
+  const l = db.prepare('SELECT * FROM facture_lignes WHERE id = ?').get(ligneId);
+  if (!l) throw new ErreurMetier('Article introuvable.', 404);
+  db.prepare('DELETE FROM facture_lignes WHERE id = ?').run(ligneId);
+  journaliser(db, 'facture', l.facture_id, 'article_retire', l);
+}
+
+/**
+ * Part d'une facture revenant à un ASIN, frais et taxes compris, répartie au prorata du
+ * montant HT de ses articles (ou des quantités si un prix manque). Une facture n'est donc
+ * jamais comptée deux fois quand elle contient plusieurs ASIN.
+ */
+export function partFactureAsin(facture, lignes, asin) {
+  const siennes = lignes.filter((l) => l.asin === asin);
+  if (!siennes.length) return null;
+  const total = totalFacture(facture);
+  const unites = siennes.reduce((s, l) => s + l.quantite, 0);
+  const prixConnus = lignes.every((l) => l.prix_unitaire_ht !== null && l.prix_unitaire_ht !== undefined);
+  const htLignes = (ls) => ls.reduce((s, l) => s + l.quantite * l.prix_unitaire_ht, 0);
+  if (prixConnus) {
+    const ht = htLignes(siennes);
+    // Articles non associés à un ASIN : le sous-total HT de la facture sert de base.
+    const base = Math.max(htLignes(lignes), facture.sous_total_ht || 0);
+    const montant = total === null ? ht : base > 0 ? (total * ht) / base : 0;
+    return { montant: arrondir(montant), ht: arrondir(ht), frais: arrondir(montant - ht), unites, estimee: false };
+  }
+  const qteTotale = lignes.reduce((s, l) => s + l.quantite, 0);
+  const montant = total === null ? 0 : (total * unites) / qteTotale;
+  return { montant: arrondir(montant), ht: null, frais: null, unites, estimee: true };
+}
+
+/** Dépense totale des factures par ASIN : Map asin → { montant, ht, frais, unites, nb_factures, estimee }. */
+export function depensesFacturesParAsin(db) {
+  const factures = db.prepare('SELECT * FROM factures').all();
+  const toutesLignes = db.prepare('SELECT facture_id, asin, quantite, prix_unitaire_ht FROM facture_lignes').all();
+  const parFacture = new Map();
+  for (const l of toutesLignes) {
+    if (!parFacture.has(l.facture_id)) parFacture.set(l.facture_id, []);
+    parFacture.get(l.facture_id).push(l);
+  }
+  const resultat = new Map();
+  for (const f of factures) {
+    const lignes = parFacture.get(f.id) || [];
+    for (const asin of new Set(lignes.map((l) => l.asin))) {
+      const part = partFactureAsin(f, lignes, asin);
+      const a = resultat.get(asin) || { montant: 0, ht: 0, frais: 0, unites: 0, nb_factures: 0, estimee: false };
+      a.montant = arrondir(a.montant + part.montant);
+      a.ht = arrondir(a.ht + (part.ht ?? 0));
+      a.frais = arrondir(a.frais + (part.frais ?? 0));
+      a.unites += part.unites;
+      a.nb_factures++;
+      a.estimee ||= part.estimee;
+      resultat.set(asin, a);
+    }
+  }
+  for (const a of resultat.values()) a.cout_moyen_unite = a.unites ? arrondir(a.montant / a.unites) : null;
+  return resultat;
+}
+
+export function creerFacture(db, f) {
+  const montants = {};
+  for (const cle of ['sous_total_ht', 'taxes', 'livraison', 'autres_frais', 'total']) {
+    montants[cle] = f[cle] === '' || f[cle] == null ? null : parserMontant(f[cle]);
+  }
+  if (montants.total === null && montants.sous_total_ht === null) throw new ErreurMetier('Indiquez au moins le sous-total HT ou le total de la facture.');
+  const lignes = validerLignesFacture(f.lignes);
   return transaction(db, () => {
     let commandeId = f.commande_id ? Number(f.commande_id) : null;
     let proposition = null;
@@ -200,13 +298,7 @@ export function creerFacture(db, f) {
       );
     const id = Number(r.lastInsertRowid);
     if (commandeId) creerDepensesFacture(db, id, commandeId, montants, parserDate(f.date_facture));
-    for (const l of lignes) {
-      assurerProduit(db, l.asin);
-      db.prepare('INSERT INTO facture_lignes (facture_id, asin, quantite, prix_unitaire_ht) VALUES (?, ?, ?, ?)').run(id, l.asin, l.quantite, l.prix);
-      if (l.prix !== null) {
-        ajouterCout(db, { asin: l.asin, montant: l.prix, source: 'facture', reference: f.numero_facture || `facture #${id}`, factureId: id, commandeId });
-      }
-    }
+    insererLignesFacture(db, { id, numero_facture: f.numero_facture, commande_id: commandeId }, lignes);
     journaliser(db, 'facture', id, 'creation', { ...f, commande_id: commandeId });
     return { id, commande_id: commandeId, proposition };
   });
@@ -248,12 +340,22 @@ export function supprimerFacture(db, id) {
   journaliser(db, 'facture', id, 'suppression', f);
 }
 
+function lireArticles(json) {
+  try {
+    const a = JSON.parse(json || '[]');
+    return Array.isArray(a) ? a.map((l) => ({ description: l.description, quantite: l.quantite, prix_unitaire_ht: l.prix_unitaire_ht, asin: l.asin })) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function listerFactures(db, { sansCommande = false } = {}) {
   return db
     .prepare(
       `SELECT f.*, c.numero_commande,
          COALESCE(fo.nom, (SELECT json_extract(d.extraction, '$.fournisseur') FROM facture_documents d WHERE d.facture_id = f.id)) AS fournisseur,
-         (SELECT d.id FROM facture_documents d WHERE d.facture_id = f.id) AS document_id
+         (SELECT d.id FROM facture_documents d WHERE d.facture_id = f.id) AS document_id,
+         (SELECT json_extract(d.extraction, '$.lignes') FROM facture_documents d WHERE d.facture_id = f.id) AS articles_json
        FROM factures f
        LEFT JOIN commandes c ON c.id = f.commande_id
        LEFT JOIN fournisseurs fo ON fo.id = f.fournisseur_id
@@ -261,10 +363,12 @@ export function listerFactures(db, { sansCommande = false } = {}) {
        ORDER BY f.id DESC`,
     )
     .all()
-    .map((f) => ({
+    .map(({ articles_json, ...f }) => ({
       ...f,
       total_calcule: totalFacture(f),
-      lignes: db.prepare('SELECT asin, quantite, prix_unitaire_ht FROM facture_lignes WHERE facture_id = ? ORDER BY id').all(f.id),
+      // Articles lus sur le document déposé, pour aider à l'association aux ASIN.
+      articles_extraits: lireArticles(articles_json),
+      lignes: db.prepare('SELECT id, asin, quantite, prix_unitaire_ht FROM facture_lignes WHERE facture_id = ? ORDER BY id').all(f.id),
     }));
 }
 

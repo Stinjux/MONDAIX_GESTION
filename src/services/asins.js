@@ -3,7 +3,7 @@ import { ErreurMetier } from '../db.js';
 import { arrondir } from '../lib/parse.js';
 import { estConfirme, STATUTS_DOSSIER } from './autorisations.js';
 import { STATUTS_ENVOI } from './envois.js';
-import { totalFacture } from './commandes.js';
+import { depensesFacturesParAsin, partFactureAsin, totalFacture } from './commandes.js';
 import { coutComplet, coutRetenu, historiqueCouts, LIBELLES_SOURCE_COUT, TYPES_DEPENSE } from './couts.js';
 import { emailsPourAsin } from './emails.js';
 import { etatStock, historiqueStockAsin } from './inventaire.js';
@@ -19,9 +19,12 @@ const SQL_QUANTITES = `
 
 // ASIN jamais présent dans un import d'inventaire : stock 0.
 const STOCK_VIDE = { quantite: 0, precedente: null, ecart: null, absent: true };
+// ASIN sans facture associée.
+const DEPENSES_VIDES = { montant: 0, ht: 0, frais: 0, unites: 0, nb_factures: 0, estimee: false, cout_moyen_unite: null };
 
 export function listerAsins(db) {
   const stock = etatStock(db);
+  const depenses = depensesFacturesParAsin(db);
   const dernierDossier = db.prepare('SELECT * FROM dossiers_autorisation WHERE asin = ? ORDER BY id DESC LIMIT 1');
   const nbEmails = db.prepare(
     `SELECT COUNT(DISTINCT e.id) AS n FROM emails e
@@ -41,6 +44,7 @@ export function listerAsins(db) {
       return {
         ...p,
         stock: stock.parAsin.get(p.asin) || STOCK_VIDE,
+        depenses_factures: depenses.get(p.asin) || DEPENSES_VIDES,
         valeur_achats_estimee: p.cout_retenu === null ? null : arrondir(p.cout_retenu * p.unites_commandees),
         autorisation: d ? { dossier_id: d.id, statut: d.statut, confirme: estConfirme(d), numero_cas: d.numero_cas } : null,
         nb_emails: nbEmails.get(p.asin, p.asin).n,
@@ -86,11 +90,16 @@ export function ficheAsin(db, asin) {
        ORDER BY COALESCE(f.date_facture, date(f.created_at)) DESC`,
     )
     .all(asin, asin)
-    .map((f) => ({
-      ...f,
-      total_calcule: totalFacture(f),
-      lignes_asin: db.prepare('SELECT quantite, prix_unitaire_ht FROM facture_lignes WHERE facture_id = ? AND asin = ?').all(f.id, asin),
-    }));
+    .map((f) => {
+      const lignes = db.prepare('SELECT id, asin, quantite, prix_unitaire_ht FROM facture_lignes WHERE facture_id = ? ORDER BY id').all(f.id);
+      return {
+        ...f,
+        total_calcule: totalFacture(f),
+        lignes_asin: lignes.filter((l) => l.asin === asin),
+        autres_asins: [...new Set(lignes.filter((l) => l.asin !== asin).map((l) => l.asin))],
+        part_asin: partFactureAsin(f, lignes, asin),
+      };
+    });
 
   const receptions = db
     .prepare(
@@ -181,6 +190,7 @@ export function ficheAsin(db, asin) {
   return {
     ...produit,
     stock: etatStock(db).parAsin.get(asin) || STOCK_VIDE,
+    depenses_factures: depensesFacturesParAsin(db).get(asin) || DEPENSES_VIDES,
     historique_stock: historiqueStock,
     cout_retenu: coutRetenu(db, asin),
     cout_complet: coutComplet(db, asin),

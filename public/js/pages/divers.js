@@ -39,7 +39,8 @@ export async function pageFactures(zone) {
       ['N°', 'Date', 'Fournisseur', 'Articles (ASIN)', { t: 'Sous-total HT', classe: 'num' }, { t: 'Total', classe: 'num' }, ''],
       factures.map(
         (f) => `<tr><td>${esc(f.numero_facture || '—')}</td><td>${date(f.date_facture)}</td><td>${esc(f.fournisseur || '—')}</td>
-          <td>${f.lignes.map((l) => `${asinLien(l.asin)} × ${l.quantite}${l.prix_unitaire_ht !== null ? ` @ ${montant(l.prix_unitaire_ht)}` : ''}`).join('<br>') || '<span class="aide">—</span>'}</td>
+          <td>${f.lignes.map((l) => `${asinLien(l.asin)} × ${l.quantite}${l.prix_unitaire_ht !== null ? ` @ ${montant(l.prix_unitaire_ht)}` : ''}`).join('<br>') || badge('aucun ASIN', 'alerte')}
+            <div><button class="petit" data-asins="${f.id}">${f.lignes.length ? 'Modifier les ASIN' : 'Associer des ASIN'}</button></div></td>
           <td class="num">${montant(f.sous_total_ht)}</td><td class="num">${montant(f.total_calcule)}</td>
           <td class="actions">${f.document_id ? `<a class="bouton petit" href="/api/factures/documents/${f.document_id}/fichier" target="_blank" rel="noopener">Document</a>` : ''}<button class="petit danger" data-suppr="${f.id}">Supprimer</button></td></tr>`,
       ),
@@ -57,6 +58,48 @@ export async function pageFactures(zone) {
     if (r) rafraichir();
   };
   zone.querySelectorAll('[data-suppr]').forEach((b) => (b.onclick = async () => (await tenter(() => suppr(`/api/factures/${b.dataset.suppr}`))) !== undefined && rafraichir()));
+  zone.querySelectorAll('[data-asins]').forEach((b) => (b.onclick = () => modifierAsinsFacture(factures.find((f) => f.id === Number(b.dataset.asins)))));
+}
+
+function ligneArticle(l = {}) {
+  return `<tr><td><input name="asin" list="liste-asins-facture" value="${esc(l.asin || '')}" placeholder="ASIN" style="width:130px" aria-label="ASIN"></td>
+    <td><input name="quantite" type="number" min="1" step="1" value="${esc(l.quantite ?? '')}" style="width:70px" aria-label="Quantité"></td>
+    <td><input name="prix_unitaire_ht" value="${esc(l.prix_unitaire_ht ?? '')}" style="width:90px" aria-label="Prix unitaire HT"></td>
+    <td>${l.description ? `<span class="aide">${esc(l.description)}</span>` : ''}</td>
+    <td><button type="button" class="petit" data-retirer>×</button></td></tr>`;
+}
+
+/** Associe (ou corrige) les ASIN des articles d'une facture enregistrée. */
+async function modifierAsinsFacture(f) {
+  const produits = await api('/api/produits');
+  // Sans article associé : on part des articles lus sur le document, s'il y en a.
+  const depart = f.lignes.length ? f.lignes : f.articles_extraits.length ? f.articles_extraits : [{}];
+  const ok = await modale({
+    titre: `ASIN de la facture ${f.numero_facture || '#' + f.id}`,
+    contenu: `<p class="aide">Une ligne par article : ASIN, quantité et prix unitaire HT. La dépense de chaque ASIN est sa part de la facture (taxes, livraison et frais répartis au prorata du montant HT). L’historique des coûts n’est jamais effacé.</p>
+      <div class="tableau"><table><thead><tr><th>ASIN</th><th>Qté</th><th>Prix unit. HT</th><th>Article lu</th><th></th></tr></thead>
+      <tbody id="articles">${depart.map(ligneArticle).join('')}</tbody></table></div>
+      <button type="button" class="petit" id="ajouter-article">+ Article</button>
+      <datalist id="liste-asins-facture">${produits.map((p) => `<option value="${esc(p.asin)}">${esc(p.titre || '')}</option>`).join('')}</datalist>`,
+    apresOuverture: (form) => {
+      const corps = form.querySelector('#articles');
+      const brancher = () => corps.querySelectorAll('[data-retirer]').forEach((b) => (b.onclick = () => b.closest('tr').remove()));
+      form.querySelector('#ajouter-article').onclick = () => {
+        corps.insertAdjacentHTML('beforeend', ligneArticle());
+        brancher();
+      };
+      brancher();
+    },
+    valider: (_, form) => {
+      const lignes = [...form.querySelectorAll('#articles tr')].map((tr) => ({
+        asin: tr.querySelector('[name=asin]').value.trim(),
+        quantite: tr.querySelector('[name=quantite]').value,
+        prix_unitaire_ht: tr.querySelector('[name=prix_unitaire_ht]').value,
+      }));
+      return put(`/api/factures/${f.id}/lignes`, { lignes: lignes.filter((l) => l.asin) });
+    },
+  });
+  if (ok) rafraichir();
 }
 
 export async function pageParametres(zone) {

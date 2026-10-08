@@ -1,4 +1,4 @@
-import { api, post, put, esc, montant, date, badge, tableau, modale, champ, tenter, references, asinLien, urlAmazon } from '../outils.js';
+import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, tenter, references, asinLien, urlAmazon } from '../outils.js';
 import { rafraichir } from '../app.js';
 import { rendreInventaire, brancherInventaire } from './produits.js';
 
@@ -43,6 +43,7 @@ export async function pageAsins(zone) {
         { t: 'Reçu', classe: 'num' },
         { t: 'Envoyé Amazon', classe: 'num' },
         { t: 'En stock', classe: 'num' },
+        { t: 'Dépensé (factures)', classe: 'num' },
         { t: 'Valeur achats (est.)', classe: 'num' },
         'Autorisation',
         'Dernière commande',
@@ -56,6 +57,7 @@ export async function pageAsins(zone) {
           <td class="num">${montant(p.cout_retenu)}${asinsEcart.has(p.asin) ? '<br>' + badge('écart', 'alerte') : ''}</td>
           <td class="num">${p.unites_commandees}</td><td class="num">${p.unites_recues}</td><td class="num">${p.unites_envoyees}</td>
           <td class="num">${celluleStock(p.stock)}</td>
+          <td class="num">${celluleDepense(p.depenses_factures)}</td>
           <td class="num">${montant(p.valeur_achats_estimee)}</td>
           <td>${a ? `<a href="#/dossiers/${a.dossier_id}">${badge(refs.statuts_dossier[a.statut] + (a.confirme ? ' ✓' : ''), TONS_DOSSIER[a.statut])}</a>` : badge('aucun dossier')}</td>
           <td>${date(p.derniere_commande)}</td>
@@ -63,7 +65,8 @@ export async function pageAsins(zone) {
       }),
       'Aucun ASIN.',
     )}
-    <p class="aide">Valeur achats (est.) = coût d’achat HT retenu × unités commandées. Stock : quantité du dernier import du fichier d’inventaire, avec l’écart depuis l’import précédent.</p>
+    <p class="aide">Dépensé (factures) = part des factures associées à l’ASIN, taxes, livraison et frais compris (répartis au prorata du montant HT des articles de chaque facture).
+      Valeur achats (est.) = coût d’achat HT retenu × unités commandées. Stock : quantité du dernier import du fichier d’inventaire, avec l’écart depuis l’import précédent.</p>
     <details class="carte"><summary><strong>Importer le fichier d’inventaire</strong> (colonne cost = coût d’achat unitaire HT)</summary>
       <div id="inventaire" style="margin-top:10px">${rendreInventaire()}</div></details>`;
 
@@ -75,6 +78,11 @@ function ecartTexte(ecart) {
   if (ecart === null || ecart === undefined) return '';
   if (ecart === 0) return '= 0';
   return `${ecart > 0 ? '▲ +' : '▼ −'}${Math.abs(ecart)}`;
+}
+
+function celluleDepense(d) {
+  if (!d.nb_factures) return '<span class="aide">—</span>';
+  return `<strong>${montant(d.montant)}</strong><div class="aide" style="margin:0">${d.nb_factures} facture(s) · ${d.unites} u.</div>`;
 }
 
 function celluleStock(s) {
@@ -105,6 +113,7 @@ export async function pageAsin(zone, asin) {
   const [p, refs] = await Promise.all([api(`/api/produits/${encodeURIComponent(asin)}`), references()]);
   const cc = p.cout_complet;
   const dernierDossier = p.dossiers[0];
+  const df = p.depenses_factures;
 
   zone.innerHTML = `
     <div class="entete"><div><a href="#/asins">← ASIN</a>
@@ -115,6 +124,8 @@ export async function pageAsin(zone, asin) {
         <button id="modifier">Titre / SKU</button><button id="cout-manuel">Saisir un coût</button></div></div>
 
     <div class="grille">
+      ${tuile(montant(df.montant), `Dépense totale (${df.nb_factures} facture(s))`)}
+      ${tuile(montant(df.cout_moyen_unite), `Coût moyen facturé / unité (${df.unites} u.)`)}
       ${tuile(montant(cc.par_unite.achat), 'Coût d’achat HT retenu / unité')}
       ${tuile(montant(cc.cout_complet_unitaire), 'Coût complet / unité')}
       ${tuile(p.unites_commandees, `Unités commandées (${p.commandes.length} commande(s))`)}
@@ -178,14 +189,18 @@ export async function pageAsin(zone, asin) {
       'Aucune commande.',
     )}
 
-    <h2>Factures</h2>
+    <div class="entete" style="margin-top:20px"><h2 style="margin:0">Factures</h2><button id="lier-facture">Lier une facture</button></div>
+    <p class="aide">Dépense totale : ${montant(df.montant)}${df.nb_factures && !df.estimee ? ` = ${montant(df.ht)} d’articles HT + ${montant(df.frais)} de taxes, livraison et frais (part de l’ASIN)` : ''}.
+      Quand une facture contient plusieurs ASIN, seule la part de cet ASIN est comptée${df.estimee ? ' ; sans prix unitaire, la part est estimée selon les quantités' : ''}.</p>
     ${tableau(
-      ['Date', 'Facture', 'Commande', 'Lignes de cet ASIN', { t: 'Total facture', classe: 'num' }],
-      p.factures.map((f) => `<tr><td>${date(f.date_facture)}</td><td>${esc(f.numero_facture || '#' + f.id)}${f.document_id ? ` · <a href="/api/factures/documents/${f.document_id}/fichier" target="_blank" rel="noopener">document</a>` : ''}</td>
-        <td>${f.commande_id ? `<a href="#/commandes/${f.commande_id}">${esc(f.numero_commande || '#' + f.commande_id)}</a>` : badge('à rattacher', 'alerte')}</td>
-        <td>${f.lignes_asin.map((l) => `${l.quantite} × ${montant(l.prix_unitaire_ht)} HT`).join('<br>') || '<span class="aide">non détaillé</span>'}</td>
-        <td class="num">${montant(f.total_calcule)}</td></tr>`),
-      'Aucune facture.',
+      ['Date', 'Facture', 'Fournisseur / autres ASIN', 'Articles de cet ASIN', { t: 'Total facture', classe: 'num' }, { t: 'Part de l’ASIN', classe: 'num' }],
+      p.factures.map((f) => `<tr><td>${date(f.date_facture)}</td><td>${esc(f.numero_facture || '#' + f.id)}${f.document_id ? ` · <a href="/api/factures/documents/${f.document_id}/fichier" target="_blank" rel="noopener">document</a>` : ''}
+          ${f.commande_id ? `<div class="aide" style="margin:0">commande <a href="#/commandes/${f.commande_id}">${esc(f.numero_commande || '#' + f.commande_id)}</a></div>` : ''}</td>
+        <td>${f.autres_asins.length ? `+ ${f.autres_asins.map((a) => asinLien(a)).join(', ')}` : '<span class="aide">ASIN seul</span>'}</td>
+        <td>${f.lignes_asin.map((l) => `${l.quantite} × ${montant(l.prix_unitaire_ht)} HT <button class="petit" data-retirer-ligne="${l.id}" title="Retirer cet article de la facture">retirer</button>`).join('<br>') || '<span class="aide">non détaillé (via la commande)</span>'}</td>
+        <td class="num">${montant(f.total_calcule)}</td>
+        <td class="num">${f.part_asin ? `<strong>${montant(f.part_asin.montant)}</strong>${f.part_asin.estimee ? '<div class="aide" style="margin:0">estimée (quantités)</div>' : ''}` : '—'}</td></tr>`),
+      'Aucune facture liée. Cliquez sur « Lier une facture ».',
     )}
 
     <h2>Réceptions</h2>
@@ -233,6 +248,13 @@ export async function pageAsin(zone, asin) {
       if (await tenter(() => post(`/api/produits/${asin}/retenir`, { cout_id: Number(b.dataset.retenir) }), 'Coût retenu mis à jour (ancien conservé dans l’historique).')) rafraichir();
     };
   });
+  zone.querySelector('#lier-facture').onclick = () => lierFacture(asin, p);
+  zone.querySelectorAll('[data-retirer-ligne]').forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm('Retirer cet article de la facture ? La facture et l’historique des coûts sont conservés.')) return;
+      if ((await tenter(() => suppr(`/api/facture-lignes/${b.dataset.retirerLigne}`), 'Article retiré.')) !== undefined) rafraichir();
+    };
+  });
   zone.querySelector('#cout-manuel').onclick = async () => {
     const ok = await modale({
       titre: 'Saisir un coût d’achat unitaire HT',
@@ -250,4 +272,42 @@ export async function pageAsin(zone, asin) {
     });
     if (ok) rafraichir();
   };
+}
+
+/** Associe l'ASIN à une facture déjà enregistrée (ajout d'un article à la facture). */
+async function lierFacture(asin, p) {
+  const factures = await api('/api/factures');
+  if (!factures.length) {
+    alert('Aucune facture enregistrée. Déposez d’abord une facture dans Factures.');
+    return;
+  }
+  const deja = new Set(p.factures.map((f) => f.id));
+  factures.sort((a, b) => deja.has(a.id) - deja.has(b.id)); // factures pas encore liées en premier
+  const libelle = (f) => `${f.numero_facture || '#' + f.id} · ${f.date_facture || 'sans date'} · ${f.fournisseur || 'fournisseur ?'} · ${montant(f.total_calcule)}${
+    f.lignes.length ? ` · ${f.lignes.map((l) => l.asin).join(', ')}` : ' · aucun ASIN'}${deja.has(f.id) ? ' (déjà liée)' : ''}`;
+  const ok = await modale({
+    titre: `Lier une facture à ${asin}`,
+    contenu: `<div class="champs">
+        <div style="grid-column:1/-1"><label for="f-facture">Facture</label><select id="f-facture" name="facture_id" required>
+          ${factures.map((f) => `<option value="${f.id}">${esc(libelle(f))}</option>`).join('')}</select></div>
+        ${champ('quantite', 'Quantité de cet ASIN', { type: 'number', attrs: 'min="1" step="1" required' })}
+        ${champ('prix_unitaire_ht', 'Prix unitaire HT (facultatif)')}</div>
+      <div id="articles-facture" class="aide"></div>
+      <p class="aide">Si la facture contient d’autres articles, ils restent associés à leurs ASIN : seule la part de cet ASIN (au prorata du montant HT) est comptée dans sa dépense.</p>`,
+    libelleValider: 'Lier',
+    apresOuverture: (form) => {
+      const select = form.querySelector('[name=facture_id]');
+      const montrer = () => {
+        const f = factures.find((x) => String(x.id) === select.value);
+        const articles = f?.articles_extraits || [];
+        form.querySelector('#articles-facture').innerHTML = articles.length
+          ? `Articles lus sur la facture : ${articles.map((a) => `${esc(a.description || '?')} (${a.quantite ?? '?'} × ${montant(a.prix_unitaire_ht)})`).join(' ; ')}`
+          : '';
+      };
+      select.onchange = montrer;
+      montrer();
+    },
+    valider: (d) => post(`/api/factures/${d.facture_id}/lignes`, { asin, quantite: d.quantite, prix_unitaire_ht: d.prix_unitaire_ht }),
+  });
+  if (ok) rafraichir();
 }
