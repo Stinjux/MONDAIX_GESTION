@@ -1,5 +1,7 @@
 // Remise à zéro complète des données (ASIN, factures, fournisseurs, envois, stock, ventes, imports,
-// dépenses, emails, autorisations, journal). Les paramètres sont conservés. Une copie complète de la
+// dépenses, emails, autorisations, journal). Les paramètres sont conservés, dont les accès email :
+// jeton du webhook et état de la synchronisation Gmail / Neo (les identifiants IMAP sont dans les
+// variables d'environnement, jamais dans la base). Une copie complète de la
 // base et des documents de factures est faite avant l'effacement (dossier « sauvegardes »).
 import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';

@@ -139,7 +139,8 @@ La page indique la date du dernier import de chacun et signale ceux de plus de 7
 ### Données des versions précédentes
 
 Remise à zéro complète (une seule fois, au démarrage de la version du 2026-10-09) : ASIN, factures, fournisseurs,
-envois, stock, ventes, imports, dépenses, emails, autorisations et journal effacés ; paramètres conservés. Une copie de
+envois, stock, ventes, imports, dépenses, emails, autorisations et journal effacés ; paramètres et accès email conservés (identifiants dans les variables
+d’environnement, jeton du webhook et état de la synchronisation Gmail / Neo). Une copie de
 la base et des documents de factures est gardée dans `data/sauvegardes/avant-remise-a-zero-<date>/`.
 
 Les anciennes commandes et lignes Google Sheets restent dans la base mais ne sont plus affichées ni comptées.

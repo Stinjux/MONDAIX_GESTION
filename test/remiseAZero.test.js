@@ -18,6 +18,8 @@ test('remise à zéro : toutes les données effacées, paramètres gardés, sauv
     const db = ouvrirBase(chemin);
     ecrireParametre(db, 'amazon.domaine', 'www.amazon.ca');
     ecrireParametre(db, 'achats.taux_taxes', '14.975');
+    ecrireParametre(db, 'email.webhook_token', 'jeton-email');
+    ecrireParametre(db, 'synchro.gmail', JSON.stringify({ dossier: 'INBOX', dernier_uid: 42 }));
     creerFacture(db, { numero_facture: 'F-1', total: 50, lignes: [{ asin: 'B0TEST0001', quantite: 2 }] });
     importerInventaire(db, { texte: 'asin,qty,cost\nB0TEST0001,2,10', mapping: { asin: 0, quantite: 1, cost: 2 }, nom: 'aura' });
     creerEnvoi(db, { numero_envoi: 'FBA1', lignes: [{ asin: 'B0TEST0001', quantite: 1 }] });
@@ -30,6 +32,8 @@ test('remise à zéro : toutes les données effacées, paramètres gardés, sauv
     }
     assert.equal(r.lignes.factures, 1);
     assert.equal(lireParametre(db, 'achats.taux_taxes'), '14.975', 'paramètres conservés');
+    assert.equal(lireParametre(db, 'email.webhook_token'), 'jeton-email', 'accès email (webhook) conservé');
+    assert.deepEqual(JSON.parse(lireParametre(db, 'synchro.gmail')), { dossier: 'INBOX', dernier_uid: 42 }, 'synchronisation email conservée');
     assert.ok(existsSync(r.sauvegarde), 'copie de la base');
     assert.equal(ouvrirBase(r.sauvegarde).prepare('SELECT COUNT(*) n FROM factures').get().n, 1, 'la sauvegarde contient les anciennes données');
     assert.ok(existsSync(join(r.sauvegarde, '..', 'factures', 'facture.pdf')), 'documents déplacés dans la sauvegarde');
