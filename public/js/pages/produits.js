@@ -1,19 +1,23 @@
-import { api, post, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, toast, references, lireFichierTexte, asinLien } from '../outils.js';
+import { api, post, suppr, confirmer, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, toast, references, lireFichierTexte, asinLien, entetePage, icone } from '../outils.js';
 import { rafraichir } from '../app.js';
 
 const etatInv = { analyse: null, texte: '', nom: '' };
 
+/** Une analyse de fichier est en cours (le bloc d'import reste ouvert). */
+export const importEnCours = () => Boolean(etatInv.analyse);
+
 export function rendreInventaire() {
   if (!etatInv.analyse) {
-    return `<h3 style="margin-top:0">Importer le fichier d’inventaire</h3>
-      <div class="actions"><input type="file" id="fichier-inv" accept=".csv,.tsv,.txt"></div>`;
+    return `<p class="aide">Fichier CSV ou TSV exporté de votre inventaire Amazon : colonnes ASIN, quantité et, si présent, cost (coût d’achat unitaire HT).</p>
+      <label class="depot" for="fichier-inv">${icone('upload', 20)}<span>Choisir le fichier d’inventaire (.csv, .tsv)</span>
+        <input type="file" id="fichier-inv" accept=".csv,.tsv,.txt"></label>`;
   }
   const a = etatInv.analyse;
   const options = [['', '— non utilisée —'], ...a.entetes.map((h, i) => [i, h])];
-  return `<h3 style="margin-top:0">Associer les colonnes · ${a.nb_lignes} ligne(s)</h3>
+  return `<h3 class="sans-marge">Associer les colonnes · ${esc(etatInv.nom)} · ${a.nb_lignes} ligne(s)</h3>
     <div class="champs">${Object.entries(a.champs).map(([cle, def]) => selecteur(`inv-${cle}`, def.libelle + (def.obligatoire ? ' *' : ''), options, a.mapping[cle] ?? '', `data-champ="${cle}"`)).join('')}</div>
     <div class="message info">Le cost importé est conservé dans l’historique. S’il diffère du coût déjà retenu, l’écart est signalé et c’est à vous de choisir la valeur.</div>
-    <div class="actions"><button class="principal" id="importer-inv">Importer</button><button id="annuler-inv">Annuler</button></div>`;
+    <div class="actions"><button type="button" class="principal" id="importer-inv">${icone('upload')}Importer</button><button type="button" id="annuler-inv">Annuler</button></div>`;
 }
 
 export function brancherInventaire(zone) {
@@ -46,22 +50,35 @@ export function brancherInventaire(zone) {
 
 export async function pageDepenses(zone) {
   const [depenses, refs, envois] = await Promise.all([api('/api/depenses'), references(), api('/api/envois')]);
+  const supprimer = async (liste) => {
+    if (!liste.length) return;
+    const ok = await confirmer({
+      titre: liste.length === 1 ? 'Supprimer cette dépense ?' : `Supprimer ${liste.length} dépenses ?`,
+      message: 'La suppression est définitive ; le coût complet des ASIN concernés sera recalculé.',
+      libelle: 'Supprimer',
+    });
+    if (!ok) return;
+    for (const id of liste) if ((await tenter(() => suppr(`/api/depenses/${id}`))) === undefined) break;
+    rafraichir();
+  };
   zone.innerHTML = `
-    <div class="entete"><div><h1>Dépenses</h1>
-      <p class="aide">Dépenses hors facture (préparation, transport vers Amazon, autres) entrant dans le coût complet.
-      Une dépense se rattache à un envoi Amazon ou directement à un ASIN. Les frais des factures (livraison, taxes, autres) sont déjà comptés avec la facture.</p></div>
-      <button class="principal" id="nouvelle">Nouvelle dépense</button></div>
+    ${entetePage({
+      titre: 'Dépenses',
+      sousTitre: 'Dépenses hors facture (préparation, transport vers Amazon, autres) entrant dans le coût complet, rattachées à un envoi Amazon ou à un ASIN. Les frais des factures sont déjà comptés avec la facture.',
+      actions: `<button type="button" class="principal" id="nouvelle">${icone('plus')}Nouvelle dépense</button>`,
+    })}
     ${tableau(
-      ['Date', 'Type', 'Rattachée à', 'Description', { t: 'Montant', classe: 'num' }, ''],
+      ['Date', 'Type', 'Rattachée à', 'Description', { t: 'Montant', classe: 'num' }, { t: '', tri: false }],
       depenses.map(
-        (d) => `<tr><td>${date(d.date_depense || d.created_at)}</td><td>${esc(refs.types_depense[d.type])}</td>
+        (d) => `<tr data-id="${d.id}"><td>${date(d.date_depense || d.created_at)}</td><td>${esc(refs.types_depense[d.type])}</td>
           <td>${d.envoi_id ? `<a href="#/envois/${d.envoi_id}">envoi ${esc(d.numero_envoi || '#' + d.envoi_id)}</a>` : d.asin ? `${asinLien(d.asin)} (${d.quantite_concernee} u.)` : '<span class="aide">non rattachée (non comptée)</span>'}</td>
           <td>${esc(d.description || '')}</td><td class="num">${montant(d.montant)}</td>
-          <td><button class="petit danger" data-suppr="${d.id}">Supprimer</button></td></tr>`,
+          <td class="actions-ligne"><button type="button" class="petit danger" data-suppr="${d.id}">${icone('trash-2')}Supprimer</button></td></tr>`,
       ),
-      'Aucune dépense.',
+      'Aucune dépense : ajoutez les frais de préparation ou de transport avec « Nouvelle dépense ».',
+      { selection: [{ libelle: 'Supprimer', icone: 'trash-2', action: (ids) => supprimer(ids) }] },
     )}`;
-  zone.querySelectorAll('[data-suppr]').forEach((b) => (b.onclick = async () => (await tenter(() => suppr(`/api/depenses/${b.dataset.suppr}`))) !== undefined && rafraichir()));
+  zone.querySelectorAll('[data-suppr]').forEach((b) => (b.onclick = () => supprimer([b.dataset.suppr])));
   zone.querySelector('#nouvelle').onclick = async () => {
     const ok = await modale({
       titre: 'Nouvelle dépense',

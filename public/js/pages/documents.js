@@ -1,4 +1,4 @@
-import { api, post, suppr, confirmer, esc, montant, date, badge, toast, tenter, modale } from '../outils.js';
+import { api, post, suppr, confirmer, esc, montant, date, badge, toast, tenter, modale, entetePage, icone } from '../outils.js';
 import { rafraichir } from '../app.js';
 
 const TYPES = 'application/pdf,image/jpeg,image/png,image/webp,image/gif';
@@ -7,20 +7,20 @@ const TYPES = 'application/pdf,image/jpeg,image/png,image/webp,image/gif';
 
 export function carteDepot({ extraction_configuree: configuree, documents }) {
   return `<div class="carte">
-    <h3 style="margin-top:0">Déposer une facture (PDF, JPEG, PNG)</h3>
+    <h3 class="sans-marge">Déposer une facture (PDF, JPEG, PNG)</h3>
     <p class="aide">${configuree
       ? 'Les données (numéro, date, montants, articles) sont extraites automatiquement ; vous vérifiez puis associez chaque article à un ASIN.'
       : 'Extraction automatique non configurée (variable ANTHROPIC_API_KEY absente) : la facture s’affiche à côté du formulaire pour une saisie manuelle.'}</p>
     <label class="depot" id="zone-depot">
       <input type="file" id="fichiers-factures" accept="${TYPES}" multiple>
-      <span>Glissez les fichiers ici ou <u>choisissez-les</u></span>
+      ${icone('upload', 20)}<span>Glissez les fichiers ici ou <u>choisissez-les</u> · plusieurs fichiers acceptés</span>
     </label>
     <div id="etat-depot" class="aide" aria-live="polite"></div>
     ${documents.length ? `<h3>À vérifier (${documents.length})</h3>
-      <div class="tableau"><table><thead><tr><th>Fichier</th><th>Déposé le</th><th>Extraction</th><th></th></tr></thead><tbody>
+      <div class="tableau"><table><thead><tr><th>Fichier</th><th>Déposé le</th><th>Extraction</th><th data-sans-tri></th></tr></thead><tbody>
       ${documents.map((d) => `<tr><td>${esc(d.nom_fichier)}</td><td>${date(d.created_at)}</td>
         <td>${d.erreur_extraction ? badge('à saisir à la main', 'alerte') : d.extraction ? badge(`${d.extraction.lignes?.length ?? 0} article(s) extrait(s)`, 'ok') : badge('—')}</td>
-        <td><a class="bouton petit" href="#/factures/document/${d.id}">Vérifier</a></td></tr>`).join('')}
+        <td><a class="bouton petit principal" href="#/factures/document/${d.id}">Vérifier</a></td></tr>`).join('')}
       </tbody></table></div>` : ''}
   </div>`;
 }
@@ -77,13 +77,13 @@ function nombre(v) {
 
 function ligneHtml(l, i, prop) {
   return `<tr data-ligne="${i}">
-    <td><input name="description" value="${esc(l.description || '')}" aria-label="Description">${l.reference ? `<div class="aide" style="margin:2px 0 0">Réf. ${esc(l.reference)}</div>` : ''}</td>
-    <td><input name="quantite" value="${esc(nombre(l.quantite))}" inputmode="numeric" style="width:64px" aria-label="Quantité"></td>
-    <td><input name="prix_unitaire_ht" value="${esc(nombre(l.prix_unitaire_ht))}" inputmode="decimal" style="width:90px" aria-label="Prix unitaire HT"></td>
+    <td><input name="description" value="${esc(l.description || '')}" aria-label="Description">${l.reference ? `<span class="aide sous">Réf. ${esc(l.reference)}</span>` : ''}</td>
+    <td><input name="quantite" value="${esc(nombre(l.quantite))}" inputmode="numeric" class="champ-qte" aria-label="Quantité"></td>
+    <td><input name="prix_unitaire_ht" value="${esc(nombre(l.prix_unitaire_ht))}" inputmode="decimal" class="champ-prix" aria-label="Prix unitaire HT"></td>
     <td class="num">${montant(l.total_ligne)}</td>
-    <td><input name="asin" list="liste-asins" value="${esc(prop?.asin || '')}" placeholder="ASIN" style="width:130px" aria-label="ASIN">
-      ${prop?.asin ? `<div class="aide" style="margin:2px 0 0">proposé : ${esc(prop.motif)}</div>` : ''}</td>
-    <td><button type="button" class="petit danger" data-retirer="${i}" aria-label="Retirer la ligne">×</button></td></tr>`;
+    <td><input name="asin" list="liste-asins" value="${esc(prop?.asin || '')}" placeholder="ASIN" class="champ-asin" aria-label="ASIN">
+      ${prop?.asin ? `<span class="aide sous">proposé : ${esc(prop.motif)}</span>` : ''}</td>
+    <td><button type="button" class="petit icone-seule" data-retirer="${i}" aria-label="Retirer la ligne">${icone('x')}</button></td></tr>`;
 }
 
 export async function pageDocument(zone, id) {
@@ -96,11 +96,13 @@ export async function pageDocument(zone, id) {
   if (!lignes.length) lignes = [{ description: '', quantite: null, prix_unitaire_ht: null, total_ligne: null }];
 
   zone.innerHTML = `
-    <div class="entete"><div><a href="#/factures">← Factures</a><h1>Vérifier la facture</h1>
-      <p class="aide">${esc(d.nom_fichier)} · déposée le ${date(d.created_at)}${x.fournisseur ? ` · ${esc(x.fournisseur)}` : ''}</p></div>
-      <div class="actions">${d.statut === 'valide' ? badge('enregistrée', 'ok') : ''}
-        <button id="reextraire" ${d.extraction_configuree ? '' : 'disabled'}>Relancer l’extraction</button>
-        ${d.statut === 'valide' ? '' : '<button class="danger" id="supprimer">Supprimer le document</button>'}</div></div>
+    ${entetePage({
+      retour: { href: '#/factures', libelle: '← Factures' },
+      titre: 'Vérifier la facture',
+      sousTitre: `${esc(d.nom_fichier)} · déposée le ${date(d.created_at)}${x.fournisseur ? ` · ${esc(x.fournisseur)}` : ''} ${d.statut === 'valide' ? badge('enregistrée', 'ok') : ''}`,
+      actions: `<button type="button" id="reextraire" ${d.extraction_configuree ? '' : 'disabled title="Extraction non configurée (ANTHROPIC_API_KEY)"'}>${icone('refresh-cw')}Relancer l’extraction</button>
+        ${d.statut === 'valide' ? '' : `<button type="button" class="danger" id="supprimer">${icone('trash-2')}Supprimer le document</button>`}`,
+    })}
     ${d.erreur_extraction ? `<div class="message alerte">${esc(d.erreur_extraction)} Saisissez les informations à partir de l’aperçu.</div>` : ''}
     <div class="verif-facture">
       <div class="apercu">${estPdf
@@ -108,7 +110,7 @@ export async function pageDocument(zone, id) {
         : `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="Aperçu de la facture"></a>`}
         <p class="aide"><a href="${url}" target="_blank" rel="noopener">Ouvrir le document dans un nouvel onglet</a></p></div>
       <form id="form-facture" class="carte">
-        <h3 style="margin-top:0">Facture</h3>
+        <h3 class="sans-marge">Facture</h3>
         <div class="champs">
           <div><label for="f-num">N° de facture</label><input id="f-num" name="numero_facture" value="${esc(x.numero_facture || '')}"></div>
           <div><label for="f-date">Date</label><input id="f-date" name="date_facture" type="date" value="${esc(x.date_facture || '')}"></div>
@@ -121,14 +123,14 @@ export async function pageDocument(zone, id) {
 
         <h3>Articles → ASIN</h3>
         <p class="aide">Associez chaque article à un ASIN (plusieurs articles = plusieurs ASIN). Un article sans ASIN n’est pas enregistré. Le prix unitaire HT alimente l’historique des coûts : un écart avec le coût retenu sera signalé, sans l’écraser.</p>
-        <div class="tableau"><table><thead><tr><th>Article</th><th>Qté</th><th>Prix unit. HT</th><th class="num">Total ligne</th><th>ASIN</th><th></th></tr></thead>
+        <div class="tableau"><table><thead><tr><th data-sans-tri>Article</th><th data-sans-tri>Qté</th><th data-sans-tri>Prix unit. HT</th><th class="num" data-sans-tri>Total ligne</th><th data-sans-tri>ASIN</th><th data-sans-tri></th></tr></thead>
           <tbody id="lignes">${lignes.map((l, i) => ligneHtml(l, i, l._prop)).join('')}</tbody></table></div>
-        <button type="button" class="petit" id="ajouter-ligne">+ Ajouter un article</button>
+        <button type="button" class="petit" id="ajouter-ligne">${icone('plus')}Ajouter un article</button>
         <datalist id="liste-asins">${produits.map((p) => `<option value="${esc(p.asin)}">${esc(p.titre || '')}</option>`).join('')}</datalist>
 
         <div class="pied-modale">${d.statut === 'valide'
           ? `<a class="bouton" href="#/factures">Facture déjà enregistrée</a>`
-          : '<button class="principal" id="enregistrer">Enregistrer la facture</button>'}</div>
+          : `<button class="principal" id="enregistrer">${icone('check')}Enregistrer la facture</button>`}</div>
       </form>
     </div>`;
 
@@ -148,8 +150,8 @@ export async function pageDocument(zone, id) {
     if (await tenter(() => post(`/api/factures/documents/${d.id}/extraire`))) rafraichir();
   };
   zone.querySelector('#supprimer')?.addEventListener('click', async () => {
-    const ok = await modale({ titre: 'Supprimer ce document ?', contenu: '<p>Le fichier et les données extraites seront supprimés.</p>', libelleValider: 'Supprimer', valider: () => suppr(`/api/factures/documents/${d.id}`) });
-    if (ok) location.hash = '#/factures';
+    const ok = await confirmer({ titre: 'Supprimer ce document ?', message: 'Le fichier et les données extraites seront supprimés définitivement.', libelle: 'Supprimer' });
+    if (ok && (await tenter(() => suppr(`/api/factures/documents/${d.id}`))) !== undefined) location.hash = '#/factures';
   });
   form.onsubmit = async (e) => {
     e.preventDefault();

@@ -10,29 +10,35 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header class="barre">
-    <a class="logo" href="#/">Mondaix <span>Gestion</span></a>
-    <button class="menu-mobile" id="menu-mobile" aria-label="Menu">☰</button>
-  </header>
+  <a class="aller-contenu" href="#contenu">Aller au contenu</a>
   <div class="cadre">
-    <nav id="nav">
-      <a href="#/" data-route="">Tableau de bord</a>
-      <a href="#/asins" data-route="asins">ASIN</a>
+    <nav id="nav" aria-label="Navigation principale">
+      <a class="logo" href="#/">Mondaix <span>Gestion</span></a>
+      <a href="#/" data-route=""><span data-icone="layout-dashboard"></span>Tableau de bord</a>
+      <a href="#/asins" data-route="asins produits"><span data-icone="package"></span>Stocks</a>
+      <a href="#/cogs" data-route="cogs"><span data-icone="calculator"></span>COGS</a>
       <div class="nav-titre">Achats</div>
-      <a href="#/factures" data-route="factures">Factures</a>
-      <a href="#/emails/gmail" data-route="emails/gmail">Gmail · confirmations</a>
-      <a href="#/fournisseurs" data-route="fournisseurs">Fournisseurs</a>
-      <div class="nav-titre">Coûts &amp; logistique</div>
-      <a href="#/depenses" data-route="depenses">Dépenses</a>
-      <a href="#/envois" data-route="envois">Envois Amazon</a>
-      <div class="nav-titre">Autorisations Amazon</div>
-      <a href="#/autorisations" data-route="autorisations">Dossiers</a>
-      <a href="#/emails/neo" data-route="emails/neo">Neo · réponses</a>
+      <a href="#/factures" data-route="factures"><span data-icone="receipt"></span>Factures</a>
+      <a href="#/fournisseurs" data-route="fournisseurs"><span data-icone="users"></span>Fournisseurs</a>
+      <a href="#/depenses" data-route="depenses"><span data-icone="wallet"></span>Dépenses</a>
+      <div class="nav-titre">Amazon</div>
+      <a href="#/envois" data-route="envois"><span data-icone="truck"></span>Envois</a>
+      <a href="#/autorisations" data-route="autorisations dossiers"><span data-icone="shield-check"></span>Autorisations</a>
+      <div class="nav-titre">Communication</div>
+      <a href="#/emails/gmail" data-route="emails"><span data-icone="mail"></span>Emails</a>
       <div class="nav-titre">Système</div>
-      <a href="#/parametres" data-route="parametres">Paramètres &amp; sources</a>
-      <a href="#/journal" data-route="journal">Journal</a>
+      <a href="#/parametres" data-route="parametres"><span data-icone="settings"></span>Paramètres</a>
+      <a href="#/journal" data-route="journal"><span data-icone="history"></span>Journal</a>
     </nav>
-    <main id="contenu"></main>
+    <div class="colonne">
+      <header class="barre">
+        <button type="button" class="menu-mobile icone-seule" id="menu-mobile" aria-label="Ouvrir le menu" aria-controls="nav" aria-expanded="false"><span data-icone="menu"></span></button>
+        <button type="button" class="recherche-globale" id="recherche-globale" aria-keyshortcuts="Control+K Meta+K">
+          <span data-icone="search"></span><span class="recherche-texte">Rechercher un ASIN, une facture, un envoi, un email…</span><kbd id="raccourci">Ctrl K</kbd>
+        </button>
+      </header>
+      <main id="contenu" tabindex="-1"></main>
+    </div>
   </div>
   <dialog id="modale"><form method="dialog" id="modale-form"></form></dialog>
   <div id="toasts"></div>

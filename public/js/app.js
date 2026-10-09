@@ -1,6 +1,9 @@
 import { references, definirDomaineAmazon, squelette, vueErreur } from './outils.js';
 import { enrichirMenus } from './menus.js';
 import { ameliorerTableaux } from './tableaux.js';
+import { installerRecherche } from './recherche.js';
+import { icone } from './icones.js';
+import { pageCogs } from './pages/cogs.js';
 import { pageTableauDeBord } from './pages/tableau.js';
 import { pageDepenses } from './pages/produits.js';
 import { pageAsins, pageAsin } from './pages/asins.js';
@@ -12,6 +15,7 @@ import { pageFournisseurs, pageFactures, pageParametres, pageJournal } from './p
 
 const ROUTES = [
   [/^$/, pageTableauDeBord],
+  [/^cogs$/, pageCogs],
   [/^factures$/, pageFactures],
   [/^factures\/document\/(\d+)$/, pageDocument],
   [/^asins$/, pageAsins],
@@ -32,11 +36,14 @@ const ROUTES = [
 export async function afficher({ chargement = true } = {}) {
   const chemin = location.hash.replace(/^#\/?/, '').split('?')[0];
   const zone = document.getElementById('contenu');
-  for (const a of document.querySelectorAll('#nav a')) {
-    const r = a.dataset.route;
-    a.classList.toggle('actif', r === '' ? chemin === '' : chemin === r || chemin.startsWith(r + '/'));
+  for (const a of document.querySelectorAll('#nav a[data-route]')) {
+    const routes = a.dataset.route.split(' ');
+    const actif = routes.some((r) => (r === '' ? chemin === '' : chemin === r || chemin.startsWith(r + '/')));
+    a.classList.toggle('actif', actif);
+    if (actif) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
   }
-  document.getElementById('nav').classList.remove('ouvert');
+  fermerMenuMobile();
   // Une fenêtre restée ouverte ne doit pas bloquer la nouvelle page.
   const modale = document.getElementById('modale');
   if (modale.open) modale.close();
@@ -74,8 +81,27 @@ new MutationObserver(() => {
   });
 }).observe(document.body, { childList: true, subtree: true });
 
-window.addEventListener('hashchange', () => afficher());
-document.getElementById('menu-mobile').onclick = () => document.getElementById('nav').classList.toggle('ouvert');
+// Icônes de la structure (navigation : 20 px ; ailleurs : 16 px).
+document.querySelectorAll('[data-icone]').forEach((el) => {
+  el.outerHTML = icone(el.dataset.icone, el.closest('nav, .barre') ? 20 : 16);
+});
+
+function fermerMenuMobile() {
+  document.getElementById('nav').classList.remove('ouvert');
+  document.getElementById('menu-mobile').setAttribute('aria-expanded', 'false');
+}
+
+window.addEventListener('hashchange', () => {
+  afficher();
+  document.getElementById('contenu').focus({ preventScroll: true });
+  window.scrollTo(0, 0);
+});
+document.getElementById('menu-mobile').onclick = () => {
+  const nav = document.getElementById('nav');
+  nav.classList.toggle('ouvert');
+  document.getElementById('menu-mobile').setAttribute('aria-expanded', String(nav.classList.contains('ouvert')));
+};
+installerRecherche();
 references()
   .then((r) => definirDomaineAmazon(r.amazon_domaine))
   .catch(() => {})

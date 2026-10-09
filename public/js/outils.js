@@ -138,6 +138,22 @@ export function informer(titre, message) {
   return modale({ titre, contenu: `<p>${message}</p>` });
 }
 
+/**
+ * En-tête commun à toutes les pages : (retour), titre, sous-titre à gauche ; actions principales à droite.
+ * retour : { href, libelle } ; actions : HTML des boutons.
+ */
+export function entetePage({ titre, titreHtml, sousTitre = '', retour = null, actions = '' }) {
+  return `<header class="entete">
+    <div>${retour ? `<a class="retour" href="${esc(retour.href)}">${esc(retour.libelle)}</a>` : ''}
+      <h1>${titreHtml ?? esc(titre)}</h1>${sousTitre ? `<p class="aide">${sousTitre}</p>` : ''}</div>
+    ${actions ? `<div class="actions">${actions}</div>` : ''}</header>`;
+}
+
+/** Info-bulle de formule (survol et focus clavier). */
+export function formule(texte, contenu = icone('info', 14)) {
+  return `<span class="formule" tabindex="0" role="note" aria-label="${esc(texte)}" data-formule="${esc(texte)}">${contenu}</span>`;
+}
+
 export function champ(nom, libelle, { type = 'text', valeur = '', attrs = '' } = {}) {
   return `<div><label for="f-${nom}">${esc(libelle)}</label><input id="f-${nom}" name="${nom}" type="${type}" value="${esc(valeur)}" ${attrs}></div>`;
 }

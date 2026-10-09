@@ -98,6 +98,10 @@ export function ameliorerTableaux(racine = document) {
   racine.querySelectorAll('.tableau:not([data-ameliore])').forEach((c) => {
     c.dataset.ameliore = '1';
     const table = c.querySelector('table');
+    // Les dates ne se coupent jamais sur deux lignes.
+    table?.querySelectorAll('td').forEach((td) => {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(td.textContent.trim())) td.classList.add('date');
+    });
     if (table) activerTri(table);
     if (c.dataset.selection) activerSelection(c);
   });

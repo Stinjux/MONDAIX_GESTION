@@ -1,4 +1,4 @@
-import { api, post, put, suppr, esc, date, badge, tableau, modale, champ, selecteur, tenter, references, asinLien } from '../outils.js';
+import { api, post, put, suppr, confirmer, esc, date, badge, tableau, modale, champ, selecteur, tenter, references, asinLien, entetePage, icone } from '../outils.js';
 import { rafraichir } from '../app.js';
 
 const TONS = { a_demander: 'alerte', demande_envoyee: 'info', documents_requis: 'alerte', approuve: 'ok', refuse: 'erreur' };
@@ -8,21 +8,24 @@ export async function pageAutorisations(zone) {
   const [etat, refs] = await Promise.all([api('/api/autorisations/asin'), references()]);
   const visibles = filtre === 'non_confirmes' ? etat.filter((a) => !a.confirme) : etat;
   zone.innerHTML = `
-    <div class="entete"><div><h1>Autorisations de vente Amazon</h1>
-      <p class="aide">ASIN → dossier → n° de cas Amazon → réponse Neo. Un statut est <strong>confirmé</strong> lorsqu’une réponse Neo validée (ou une confirmation explicite) l’appuie.</p></div>
-      <button class="principal" id="nouveau">Nouveau dossier</button></div>
+    ${entetePage({
+      titre: 'Autorisations de vente',
+      sousTitre: 'ASIN → dossier → réponse Neo. Un statut est <strong>confirmé</strong> lorsqu’une réponse Neo validée (ou une confirmation explicite) l’appuie.',
+      actions: `<button type="button" class="principal" id="nouveau">${icone('plus')}Nouveau dossier</button>`,
+    })}
     <div class="onglets">${[['non_confirmes', `Sans statut confirmé (${etat.filter((a) => !a.confirme).length})`], ['tous', `Tous les ASIN (${etat.length})`]]
       .map(([f, t]) => `<a href="#/autorisations?filtre=${f}" class="${f === filtre ? 'actif' : ''}">${t}</a>`).join('')}</div>
     ${tableau(
-      ['ASIN', 'Titre', 'Statut', 'N° de cas', { t: 'Réponses Neo', classe: 'num' }, 'Confirmation', ''],
+      ['ASIN', 'Titre', 'Statut', 'N° de cas', { t: 'Réponses Neo', classe: 'num' }, 'Confirmation', { t: '', tri: false }],
       visibles.map(
         (a) => `<tr><td>${asinLien(a.asin)}</td><td>${esc(a.titre || '')}</td>
           <td>${a.dossier_id ? `<a href="#/dossiers/${a.dossier_id}">${badge(refs.statuts_dossier[a.statut], TONS[a.statut])}</a>` : badge('aucun dossier', 'alerte')}</td>
           <td class="mono">${esc(a.numero_cas || '—')}</td><td class="num">${a.reponses_neo}</td>
           <td>${a.confirme ? badge('confirmé', 'ok') : badge('non confirmé', 'alerte')}</td>
-          <td>${a.dossier_id ? '' : `<button class="petit" data-creer="${a.asin}">Créer le dossier</button>`}</td></tr>`,
+          <td class="actions-ligne">${a.dossier_id ? '' : `<button type="button" class="petit" data-creer="${a.asin}">${icone('plus')}Créer le dossier</button>`}</td></tr>`,
       ),
-      'Aucun ASIN à afficher.',
+      filtre === 'non_confirmes' ? 'Tous les ASIN ont un statut confirmé.' : 'Aucun ASIN : déposez d’abord une facture.',
+      { videAction: filtre === 'non_confirmes' ? { libelle: 'Voir tous les ASIN', href: '#/autorisations?filtre=tous' } : null },
     )}`;
   const creer = async (asin = '') => {
     const r = await modale({
@@ -48,9 +51,12 @@ export async function pageDossier(zone, id) {
     ['Statut confirmé', d.statut_confirme ? 'oui' : 'non', d.statut_confirme ? 'ok' : 'partiel'],
   ];
   zone.innerHTML = `
-    <div class="entete"><div><a href="#/autorisations">← Autorisations</a><h1>Dossier #${d.id} · ${asinLien(d.asin)}</h1>
-      <p class="aide">${esc(d.titre || '')} · demande du ${date(d.date_demande)}</p></div>
-      <div class="actions"><button id="modifier">Modifier</button><button class="danger" id="supprimer">Supprimer</button></div></div>
+    ${entetePage({
+      retour: { href: '#/autorisations', libelle: '← Autorisations' },
+      titreHtml: `Dossier #${d.id} · ${asinLien(d.asin)}`,
+      sousTitre: `${esc(d.titre || '')} · demande du ${date(d.date_demande)}`,
+      actions: `<button type="button" class="danger" id="supprimer">${icone('trash-2')}Supprimer</button><button type="button" class="principal" id="modifier">Modifier</button>`,
+    })}
     <div class="chaine">${etapes.map(([n, det, e]) => `<div class="etape ${e}"><div class="nom">${esc(n)}</div><div class="det">${esc(det)}</div></div>`).join('')}</div>
     ${d.notes ? `<div class="carte">${esc(d.notes)}</div>` : ''}
     <h2>Réponses Neo rattachées</h2>
@@ -77,7 +83,7 @@ export async function pageDossier(zone, id) {
     if (ok) rafraichir();
   };
   zone.querySelector('#supprimer').onclick = async () => {
-    const ok = await modale({ titre: 'Supprimer le dossier ?', contenu: '<p>Les réponses Neo rattachées repasseront « à rapprocher ».</p>', libelleValider: 'Supprimer', valider: () => suppr(`/api/dossiers/${d.id}`) });
-    if (ok) location.hash = '#/autorisations';
+    const ok = await confirmer({ titre: 'Supprimer le dossier ?', message: 'Le dossier est supprimé définitivement. Les emails restent associés à l’ASIN.', libelle: 'Supprimer' });
+    if (ok && (await tenter(() => suppr(`/api/dossiers/${d.id}`))) !== undefined) location.hash = '#/autorisations';
   };
 }

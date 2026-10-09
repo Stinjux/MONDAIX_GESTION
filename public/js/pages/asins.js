@@ -1,6 +1,6 @@
-import { api, post, put, suppr, confirmer, informer, esc, montant, date, badge, tableau, modale, champ, tenter, references, asinLien, urlAmazon } from '../outils.js';
+import { api, post, put, suppr, confirmer, informer, esc, montant, date, badge, tableau, modale, champ, tenter, references, asinLien, urlAmazon, entetePage, icone, formule } from '../outils.js';
 import { rafraichir } from '../app.js';
-import { rendreInventaire, brancherInventaire } from './produits.js';
+import { rendreInventaire, brancherInventaire, importEnCours } from './produits.js';
 
 const TONS_DOSSIER = { a_demander: 'alerte', demande_envoyee: 'info', documents_requis: 'alerte', approuve: 'ok', refuse: 'erreur' };
 const etat = { recherche: '' };
@@ -19,6 +19,31 @@ function lienListe(filtre, tri) {
 // Actif : au moins une unité en stock au dernier import d'inventaire ; inactif : 0 (ou jamais importé).
 const estActif = (p) => p.stock?.quantite > 0;
 
+// Seuil d'alerte « stock bas » : préférence d'affichage, enregistrée dans ce navigateur.
+const SEUIL_DEFAUT = 5;
+function lireSeuil() {
+  try {
+    const v = Number(localStorage.getItem('mondaix.seuil_stock'));
+    return Number.isInteger(v) && v >= 0 && localStorage.getItem('mondaix.seuil_stock') !== null ? v : SEUIL_DEFAUT;
+  } catch {
+    return SEUIL_DEFAUT;
+  }
+}
+function ecrireSeuil(v) {
+  try {
+    localStorage.setItem('mondaix.seuil_stock', String(v));
+  } catch {
+    // stockage indisponible : seuil par défaut
+  }
+}
+
+/** État du stock : rupture (0), bas (≤ seuil), en stock. */
+export function etatStock(quantite, seuil = lireSeuil()) {
+  if (!quantite) return { cle: 'rupture', badge: badge('Rupture', 'erreur') };
+  if (quantite <= seuil) return { cle: 'bas', badge: badge('Stock bas', 'alerte') };
+  return { cle: 'en_stock', badge: badge('En stock', 'ok') };
+}
+
 const TRIS = {
   '': ['Dernière facture', null],
   variation: ['Plus grande variation de stock', (a, b) => Math.abs(b.stock?.ecart ?? -1) - Math.abs(a.stock?.ecart ?? -1)],
@@ -30,12 +55,14 @@ const TRIS = {
 export async function pageAsins(zone) {
   const filtre = paramUrl('filtre');
   const tri = TRIS[paramUrl('tri')] ? paramUrl('tri') : '';
+  const seuil = lireSeuil();
   const [liste, ecarts, refs] = await Promise.all([api('/api/produits'), api('/api/ecarts-couts'), references()]);
   const asinsEcart = new Set(ecarts.map((e) => e.asin));
   const filtres = {
     '': ['Tous', () => true],
     actifs: ['Actifs (en stock)', estActif],
     inactifs: ['Inactifs (0 en stock)', (p) => !estActif(p)],
+    bas: ['Stock bas', (p) => etatStock(p.stock?.quantite, seuil).cle === 'bas'],
     ecarts: ['Écarts de coût', (p) => asinsEcart.has(p.asin)],
     sans_cout: ['Sans coût d’achat', (p) => p.cout_retenu === null],
     autorisation: ['Autorisation non confirmée', (p) => !p.autorisation?.confirme],
@@ -45,12 +72,17 @@ export async function pageAsins(zone) {
   if (TRIS[tri][1]) visibles.sort(TRIS[tri][1]);
 
   zone.innerHTML = `
-    <div class="entete"><div><h1>ASIN</h1>
-      <p class="aide">Cliquez sur un ASIN pour ouvrir sa page Amazon, ou sur « fiche » pour voir tout son historique : factures, coûts, envois et réceptions Amazon, stock, autorisation et emails.</p></div></div>
-    <div class="actions" style="margin-bottom:8px">
-      <div><label for="recherche-asin">Rechercher (ASIN, titre, SKU)</label><input id="recherche-asin" type="search" value="${esc(etat.recherche)}" placeholder="ex. B0…"></div>
+    ${entetePage({
+      titre: 'Stocks',
+      sousTitre: 'Tous les ASIN : stock Amazon (dernier import d’inventaire), achats, envois et coûts. Cliquez sur un ASIN pour sa page Amazon, sur « fiche » pour son historique.',
+      actions: `<button type="button" class="principal" id="ouvrir-import">${icone('upload')}Importer l’inventaire</button>`,
+    })}
+    <div class="filtres">
+      <div><label for="recherche-asin">Rechercher</label><input id="recherche-asin" type="search" value="${esc(etat.recherche)}" placeholder="ASIN, titre ou SKU"></div>
       <div><label for="tri-asin">Trier par</label><select id="tri-asin">${Object.entries(TRIS)
         .map(([t, [l]]) => `<option value="${t}" ${t === tri ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+      <div><label for="seuil-stock">Seuil d’alerte (unités) ${formule('« Stock bas » quand le stock est entre 1 et ce seuil ; « Rupture » à 0. Réglage enregistré dans ce navigateur.')}</label>
+        <input id="seuil-stock" type="number" min="0" step="1" value="${seuil}" class="champ-court"></div>
     </div>
     <div class="onglets">${Object.entries(filtres)
       .map(([f, [t, fn]]) => `<a href="${lienListe(f, tri)}" class="${f === filtre ? 'actif' : ''}">${t} (${liste.filter(fn).length})</a>`)
@@ -59,39 +91,40 @@ export async function pageAsins(zone) {
     ${tableau(
       [
         'ASIN',
-        'État',
         'Titre',
-        { t: 'Coût HT retenu', classe: 'num' },
+        { t: 'Stock', classe: 'num' },
+        'État',
+        { t: 'Coût HT', classe: 'num' },
         { t: 'Acheté', classe: 'num' },
-        { t: 'Envoyé Amazon', classe: 'num' },
-        { t: 'Reçu par Amazon', classe: 'num' },
-        { t: 'En stock', classe: 'num' },
-        { t: 'Dépensé (factures)', classe: 'num' },
+        { t: 'Envoyé', classe: 'num' },
+        { t: 'Reçu Amazon', classe: 'num' },
+        { t: 'Dépensé', classe: 'num' },
         'Autorisation',
-        'Dernière facture',
+        'Dern. facture',
         { t: 'Emails', classe: 'num' },
       ],
       visibles.map((p) => {
         const a = p.autorisation;
         return `<tr>
           <td>${asinLien(p.asin)}</td>
-          <td>${estActif(p) ? badge('actif', 'ok') : badge('inactif')}</td>
-          <td>${esc(p.titre || '')}${p.sku ? `<div class="aide" style="margin:0">SKU ${esc(p.sku)}</div>` : ''}</td>
+          <td class="titre">${esc(p.titre || '')}${p.sku ? `<span class="aide sous">SKU ${esc(p.sku)}</span>` : ''}</td>
+          <td class="num" data-tri="${p.stock.quantite}">${celluleStock(p.stock)}</td>
+          <td>${etatStock(p.stock.quantite, seuil).badge}<span class="aide sous">${estActif(p) ? 'actif' : 'inactif'}</span></td>
           <td class="num">${montant(p.cout_retenu)}${asinsEcart.has(p.asin) ? '<br>' + badge('écart', 'alerte') : ''}</td>
           <td class="num">${p.unites_achetees}</td><td class="num">${p.unites_envoyees}</td>
-          <td class="num">${p.unites_recues_amazon}${p.unites_en_transit ? `<div class="aide" style="margin:0">${p.unites_en_transit} en transit</div>` : ''}</td>
-          <td class="num">${celluleStock(p.stock)}</td>
+          <td class="num">${p.unites_recues_amazon}${p.unites_en_transit ? `<span class="aide sous">${p.unites_en_transit} en transit</span>` : ''}</td>
           <td class="num">${celluleDepense(p.depenses_factures)}</td>
           <td>${a ? `<a href="#/dossiers/${a.dossier_id}">${badge(refs.statuts_dossier[a.statut] + (a.confirme ? ' ✓' : ''), TONS_DOSSIER[a.statut])}</a>` : badge('aucun dossier')}</td>
           <td>${date(p.derniere_facture)}</td>
           <td class="num">${p.nb_emails}</td></tr>`;
       }),
-      'Aucun ASIN.',
+      q || filtre ? 'Aucun ASIN ne correspond à ces critères.' : 'Aucun ASIN : importez votre fichier d’inventaire ou déposez une facture.',
+      { videAction: q || filtre ? { libelle: 'Voir tous les ASIN', href: '#/asins' } : { libelle: 'Déposer une facture', href: '#/factures' } },
     )}
-    <p class="aide">Dépensé (factures) = part des factures associées à l’ASIN, taxes, livraison et frais compris (répartis au prorata du montant HT des articles de chaque facture).
-      Acheté = unités des factures non annulées. Stock : quantité du dernier import du fichier d’inventaire, avec l’écart depuis l’import précédent. Actif = au moins 1 unité en stock ; inactif = 0.</p>
-    <details class="carte"><summary><strong>Importer le fichier d’inventaire</strong> (colonne cost = coût d’achat unitaire HT)</summary>
-      <div id="inventaire" style="margin-top:10px">${rendreInventaire()}</div></details>`;
+    <p class="aide">Dépensé (factures) = part des factures associées à l’ASIN, taxes, livraison et frais compris (au prorata du montant HT des articles).
+      Acheté = unités des factures non annulées. Stock : dernier import du fichier d’inventaire, avec l’écart depuis l’import précédent.</p>
+    <details class="carte" id="bloc-import" ${importEnCours() ? 'open' : ''}><summary><strong>Importer le fichier d’inventaire</strong> (colonne cost = coût d’achat unitaire HT)</summary>
+      <div id="inventaire" class="pile">${rendreInventaire()}</div></details>`;
 
   const recherche = zone.querySelector('#recherche-asin');
   let delai;
@@ -106,22 +139,33 @@ export async function pageAsins(zone) {
     }, 300);
   };
   zone.querySelector('#tri-asin').onchange = (e) => (location.hash = lienListe(filtre, e.target.value));
+  zone.querySelector('#seuil-stock').onchange = (e) => {
+    const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
+    ecrireSeuil(v);
+    rafraichir();
+  };
+  zone.querySelector('#ouvrir-import').onclick = () => {
+    const bloc = zone.querySelector('#bloc-import');
+    bloc.open = true;
+    bloc.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    bloc.querySelector('summary').focus({ preventScroll: true });
+  };
   brancherInventaire(zone);
 }
 
 function ecartTexte(ecart) {
   if (ecart === null || ecart === undefined) return '';
   if (ecart === 0) return '= 0';
-  return `${ecart > 0 ? '▲ +' : '▼ −'}${Math.abs(ecart)}`;
+  return `${icone(ecart > 0 ? 'arrow-up' : 'arrow-down', 14)}${ecart > 0 ? '+' : '−'}${Math.abs(ecart)}`;
 }
 
 function celluleDepense(d) {
   if (!d.nb_factures) return '<span class="aide">—</span>';
-  return `<strong>${montant(d.montant)}</strong><div class="aide" style="margin:0">${d.nb_factures} facture(s) · ${d.unites} u.</div>`;
+  return `<strong>${montant(d.montant)}</strong><span class="aide sous">${d.nb_factures} facture(s) · ${d.unites} u.</span>`;
 }
 
 function celluleStock(s) {
-  return `<strong>${s.quantite}</strong>${s.ecart !== null && s.ecart !== 0 ? `<div class="variation">${ecartTexte(s.ecart)}</div>` : ''}`;
+  return `<strong>${s.quantite}</strong>${s.ecart !== null && s.ecart !== 0 ? `<span class="variation">${ecartTexte(s.ecart)}</span>` : ''}`;
 }
 
 /* ------------------------------------------------------------------ fiche */
@@ -150,26 +194,27 @@ export async function pageAsin(zone, asin) {
   const df = p.depenses_factures;
 
   zone.innerHTML = `
-    <div class="entete"><div><a href="#/asins">← ASIN</a>
-      <h1>${asinLien(p.asin, { fiche: false })}</h1>
-      <p class="aide">${esc(p.titre || 'Sans titre')}${p.sku ? ' · SKU ' + esc(p.sku) : ''}</p></div>
-      <div class="actions">
-        <a class="bouton" href="${esc(urlAmazon(p.asin))}" target="_blank" rel="noopener noreferrer">Ouvrir sur Amazon ↗</a>
-        <button id="modifier">Titre / SKU</button><button id="cout-manuel">Saisir un coût</button></div></div>
+    ${entetePage({
+      retour: { href: '#/asins', libelle: '← Stocks' },
+      titreHtml: asinLien(p.asin, { fiche: false }),
+      sousTitre: `${esc(p.titre || 'Sans titre')}${p.sku ? ' · SKU ' + esc(p.sku) : ''} · ${etatStock(p.stock.quantite).badge}`,
+      actions: `<a class="bouton" href="${esc(urlAmazon(p.asin))}" target="_blank" rel="noopener noreferrer">${icone('external-link')}Ouvrir sur Amazon</a>
+        <button type="button" id="modifier">Titre / SKU</button><button type="button" class="principal" id="cout-manuel">${icone('plus')}Saisir un coût</button>`,
+    })}
 
-    <div class="grille">
-      ${tuile(montant(df.montant), `Dépense totale (${df.nb_factures} facture(s))`)}
-      ${tuile(montant(df.cout_moyen_unite), `Coût moyen facturé / unité (${df.unites} u.)`)}
-      ${tuile(montant(cc.par_unite.achat), 'Coût d’achat HT retenu / unité')}
-      ${tuile(montant(cc.cout_complet_unitaire), 'Coût complet / unité')}
+    <div class="grille grille-4">
+      ${tuile(`${p.stock.quantite}${p.stock.ecart ? ` <span class="variation">${ecartTexte(p.stock.ecart)}</span>` : ''}`, 'Unités en stock (dernier import)')}
       ${tuile(p.unites_achetees, 'Unités achetées (factures)')}
       ${tuile(p.unites_envoyees, 'Unités expédiées à Amazon')}
       ${tuile(`${p.unites_recues_amazon}${p.unites_en_transit ? ` <span class="variation">${p.unites_en_transit} en transit</span>` : ''}`, 'Unités reçues par Amazon')}
-      ${tuile(`${p.stock.quantite}${p.stock.ecart ? ` <span class="variation">${ecartTexte(p.stock.ecart)}</span>` : ''}`, 'Unités en stock (dernier import)')}
+      ${tuile(montant(cc.par_unite.achat), 'Coût d’achat HT retenu / unité')}
+      ${tuile(montant(df.cout_moyen_unite), `Coût moyen facturé / unité (${df.unites} u.)`)}
+      ${tuile(montant(cc.cout_complet_unitaire), 'Coût complet / unité')}
+      ${tuile(montant(df.montant), `Dépense totale (${df.nb_factures} facture(s))`)}
     </div>
 
-    <div class="deux-colonnes" style="margin-top:14px">
-      <div class="carte"><h3 style="margin-top:0">Coût complet par unité</h3>
+    <div class="deux-colonnes">
+      <div class="carte"><h3 class="sans-marge">Coût complet par unité ${formule('Coût complet = achat HT + frais des factures (au prorata) + frais d’envoi Amazon (au prorata des unités) + dépenses rattachées à l’ASIN.')}</h3>
         <table><tbody>
           <tr><td>Achat HT</td><td class="num">${montant(cc.par_unite.achat)}</td></tr>
           <tr><td>Frais des factures (livraison${cc.taxes_incluses ? ', taxes' : ''}, autres)</td><td class="num">${montant(cc.par_unite.frais_facture)}</td></tr>
@@ -177,13 +222,13 @@ export async function pageAsin(zone, asin) {
           <tr><td>Dépenses rattachées à l’ASIN</td><td class="num">${montant(cc.par_unite.frais_directs)}</td></tr>
           <tr><td><strong>Total</strong></td><td class="num"><strong>${montant(cc.cout_complet_unitaire)}</strong></td></tr>
         </tbody></table>
-        ${cc.alertes.map((a) => `<div class="message alerte" style="margin:6px 0 0">${esc(a)}</div>`).join('')}</div>
-      <div class="carte"><h3 style="margin-top:0">Autorisation de vente</h3>
+        ${cc.alertes.map((a) => `<div class="message alerte pile">${esc(a)}</div>`).join('')}</div>
+      <div class="carte"><h3 class="sans-marge">Autorisation de vente</h3>
         ${dernierDossier
           ? `<p>${badge(refs.statuts_dossier[dernierDossier.statut], TONS_DOSSIER[dernierDossier.statut])} ${dernierDossier.confirme ? badge('confirmé', 'ok') : badge('non confirmé', 'alerte')}</p>
              <p>N° de cas : <span class="mono">${esc(dernierDossier.numero_cas || '—')}</span> · <a href="#/dossiers/${dernierDossier.id}">ouvrir le dossier</a></p>`
           : '<p>Aucun dossier. <a href="#/autorisations?filtre=tous">Créer un dossier</a></p>'}
-        <p class="aide" style="margin-bottom:0">${p.emails.length} email(s) lié(s) à cet ASIN.</p></div>
+        <p class="aide sous">${p.emails.length} email(s) lié(s) à cet ASIN.</p></div>
     </div>
 
     <h2>Historique complet</h2>
@@ -215,7 +260,7 @@ export async function pageAsin(zone, asin) {
       'Aucun coût enregistré.',
     )}
 
-    <div class="entete" style="margin-top:20px"><h2 style="margin:0">Factures</h2><button id="lier-facture">Lier une facture</button></div>
+    <div class="section-titre"><h2>Factures</h2><button type="button" id="lier-facture">${icone('plus')}Lier une facture</button></div>
     <p class="aide">Dépense totale : ${montant(df.montant)}${df.nb_factures && !df.estimee ? ` = ${montant(df.ht)} d’articles HT + ${montant(df.frais)} de taxes, livraison et frais (part de l’ASIN)` : ''}.
       Quand une facture contient plusieurs ASIN, seule la part de cet ASIN est comptée${df.estimee ? ' ; sans prix unitaire, la part est estimée selon les quantités' : ''}.</p>
     ${tableau(
@@ -225,7 +270,7 @@ export async function pageAsin(zone, asin) {
         <td>${f.autres_asins.length ? `+ ${f.autres_asins.map((a) => asinLien(a)).join(', ')}` : '<span class="aide">ASIN seul</span>'}</td>
         <td>${f.lignes_asin.map((l) => `${l.quantite} × ${montant(l.prix_unitaire_ht)} HT${f.annulee ? '' : ` <button class="petit" data-retirer-ligne="${l.id}" title="Retirer cet article de la facture">retirer</button>`}`).join('<br>')}</td>
         <td class="num">${montant(f.total_calcule)}</td>
-        <td class="num">${f.part_asin ? `<strong>${montant(f.part_asin.montant)}</strong>${f.part_asin.estimee ? '<div class="aide" style="margin:0">estimée (quantités)</div>' : ''}` : '—'}</td></tr>`),
+        <td class="num">${f.part_asin ? `<strong>${montant(f.part_asin.montant)}</strong>${f.part_asin.estimee ? '<span class="aide sous">estimée (quantités)</span>' : ''}` : '—'}</td></tr>`),
       'Aucune facture liée. Cliquez sur « Lier une facture ».',
     )}
 
@@ -303,7 +348,7 @@ async function lierFacture(asin, p) {
   const ok = await modale({
     titre: `Lier une facture à ${asin}`,
     contenu: `<div class="champs">
-        <div style="grid-column:1/-1"><label for="f-facture">Facture</label><select id="f-facture" name="facture_id" required>
+        <div class="pleine-largeur"><label for="f-facture">Facture</label><select id="f-facture" name="facture_id" required>
           ${factures.map((f) => `<option value="${f.id}">${esc(libelle(f))}</option>`).join('')}</select></div>
         ${champ('quantite', 'Quantité de cet ASIN', { type: 'number', attrs: 'min="1" step="1" required' })}
         ${champ('prix_unitaire_ht', 'Prix unitaire HT (facultatif)')}</div>
