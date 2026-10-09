@@ -1,6 +1,7 @@
 // Vue d'ensemble des trois imports : inventaire (Aura), rapport de commandes Amazon et Google Sheet d'achats.
 import { parserCsv } from '../lib/csv.js';
 import { normaliserAsin } from '../lib/parse.js';
+import { etatConnexion } from './synchroSheet.js';
 
 /** Fréquence conseillée : chaque lundi pour les trois fichiers (7 jours). */
 export const FREQUENCE_JOURS = 7;
@@ -60,5 +61,10 @@ export function resumeImports(db) {
        ORDER BY i.periode DESC`,
     )
     .all();
-  return { frequence_jours: FREQUENCE_JOURS, inventaire: etat(inventaire), ventes: etat(ventes), achats: { ...etat(achats), mois } };
+  // Lecture automatique : un envoi reçu depuis moins d'un jour suffit à être à jour.
+  const c = etatConnexion(db);
+  const auto = { configure: c.configure, synchro: c.synchro, minutes_depuis: c.minutes_depuis, interrompue: c.interrompue };
+  const etatAchats = etat(achats);
+  if (c.configure && c.minutes_depuis !== null && c.minutes_depuis < 24 * 60) etatAchats.en_retard = false;
+  return { frequence_jours: FREQUENCE_JOURS, inventaire: etat(inventaire), ventes: etat(ventes), achats: { ...etatAchats, mois, auto } };
 }

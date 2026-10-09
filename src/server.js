@@ -21,6 +21,7 @@ import * as documents from './services/documentsFactures.js';
 import * as ventes from './services/ventes.js';
 import * as achats from './services/achats.js';
 import * as imports from './services/imports.js';
+import * as synchroSheet from './services/synchroSheet.js';
 
 const DOSSIER_PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -53,6 +54,18 @@ export function creerRoutes(db) {
   r('GET', '/api/imports/ventes', () => ventes.listerImportsVentes(db));
   r('DELETE', '/api/imports/ventes/:id', ({ p }) => ventes.supprimerImportVentes(db, +p.id));
   r('POST', '/api/imports/achats', ({ corps }) => achats.importerAchats(db, corps));
+  // Lecture automatique du Google Sheet (script Apps Script installé dans le Sheet)
+  r('POST', '/api/imports/achats/webhook', ({ corps, entetes }) => {
+    synchroSheet.verifierJetonSheet(db, entetes['x-mondaix-token']);
+    return synchroSheet.recevoirSheet(db, corps);
+  });
+  r('GET', '/api/imports/achats/connexion', ({ q }) => {
+    const e = synchroSheet.etatConnexion(db);
+    const origine = String(q.get('origine') || '');
+    const script = e.jeton && /^https?:\/\/[^/\s]+$/.test(origine) ? synchroSheet.scriptSheet(origine, e.jeton) : null;
+    return { configure: e.configure, synchro: e.synchro, minutes_depuis: e.minutes_depuis, interrompue: e.interrompue, script };
+  });
+  r('POST', '/api/imports/achats/jeton', () => ({ ok: Boolean(synchroSheet.genererJeton(db)) }));
   r('GET', '/api/imports/resume', () => imports.resumeImports(db));
   r('POST', '/api/imports/detecter', ({ corps }) => ({ type: imports.detecterType(corps.texte) }));
   r('POST', '/api/factures/:id/recue', ({ p, corps }) => achats.marquerRecue(db, +p.id, corps.recue !== false));

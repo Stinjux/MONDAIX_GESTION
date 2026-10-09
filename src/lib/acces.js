@@ -13,7 +13,7 @@ function egal(a, b) {
 
 /** Routes accessibles sans mot de passe (le webhook a son propre jeton). */
 export function routePublique(methode, chemin) {
-  return (methode === 'GET' && chemin === '/sante') || (methode === 'POST' && /^\/api\/emails\/(gmail|neo)\/webhook$/.test(chemin));
+  return (methode === 'GET' && chemin === '/sante') || (methode === 'POST' && (/^\/api\/emails\/(gmail|neo)\/webhook$/.test(chemin) || chemin === '/api/imports/achats/webhook'));
 }
 
 /**
