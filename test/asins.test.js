@@ -294,3 +294,28 @@ test('stock total cohérent avec les factures : le stock Amazon fait partie des 
   const b = listerAsins(db).find((x) => x.asin === 'B0AAAAAAA2').stock_total;
   assert.deepEqual([b.amazon, b.a_envoyer, b.total, b.incoherent], [28, 0, 28, true]);
 });
+
+test('import d’inventaire supprimé par erreur : stock, coûts et coût retenu reviennent à l’état précédent', async () => {
+  const { listerImportsInventaire, supprimerImportInventaire } = await import('../src/services/inventaire.js');
+  const { coutRetenu, historiqueCouts } = await import('../src/services/couts.js');
+  const im = (t, nom) => importerInventaire(db, { texte: t, mapping: { asin: 0, quantite: 1, cost: 2 }, nom });
+  const r1 = im('asin,qty,cost\nB0AAAAAAA1,14,10\n', 'initial.csv');
+  const r2 = im('asin,qty,cost\nB0AAAAAAA1,40,99\nB0AAAAAAA2,5,3\n', 'erreur.csv');
+  let imports = listerImportsInventaire(db);
+  assert.deepEqual(imports.map((i) => [i.nom, i.stock_initial, i.dernier, i.unites]), [['erreur.csv', false, true, 45], ['initial.csv', true, false, 14]]);
+  assert.equal(coutRetenu(db, 'B0AAAAAAA1').montant_unitaire_ht, 10, 'l’import fautif n’a pas écrasé le coût retenu');
+  assert.equal(coutRetenu(db, 'B0AAAAAAA2').montant_unitaire_ht, 3);
+
+  assert.deepEqual(supprimerImportInventaire(db, r2.import_id), { asin: 2, couts: 2 });
+  assert.equal(etatStock(db).dernier.import_id, r1.import_id, 'le stock redevient celui de l’import précédent');
+  assert.equal(etatStock(db).parAsin.get('B0AAAAAAA1').quantite, 14);
+  assert.equal(historiqueCouts(db, 'B0AAAAAAA1').length, 1);
+  assert.equal(coutRetenu(db, 'B0AAAAAAA2'), null, 'coût retenu retiré avec l’import, aucun autre coût');
+  imports = listerImportsInventaire(db);
+  assert.deepEqual(imports.map((i) => [i.nom, i.stock_initial, i.dernier]), [['initial.csv', true, true]]);
+  assert.throws(() => supprimerImportInventaire(db, r2.import_id), /introuvable/);
+  // Stock initial supprimé : l'import suivant devient le stock initial
+  const r3 = im('asin,qty,cost\nB0AAAAAAA1,12,\n', 'oct.csv');
+  supprimerImportInventaire(db, r1.import_id);
+  assert.deepEqual(listerImportsInventaire(db).map((i) => [i.id, i.stock_initial]), [[r3.import_id, true]]);
+});

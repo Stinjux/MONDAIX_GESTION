@@ -191,10 +191,10 @@ export function ficheAsin(db, asin) {
       detail: `${e.expediteur || ''} · ${e.via}`,
       lien: `#/emails/${e.source}?email=${e.id}`,
     })),
-    ...historiqueStock.map((h) => ({
+    ...historiqueStock.map((h, i) => ({
       date: String(h.date).slice(0, 10),
       type: 'stock',
-      libelle: `Stock · import ${h.nom || '#' + h.import_id}`,
+      libelle: `${i === historiqueStock.length - 1 ? 'Stock initial' : 'Stock'} · import ${h.nom || '#' + h.import_id}`,
       detail: `${h.quantite} unité(s)${h.ecart === null ? '' : ` · ${h.ecart > 0 ? '+' : h.ecart < 0 ? '−' : ''}${Math.abs(h.ecart)} depuis l’import précédent`}`,
       lien: null,
     })),

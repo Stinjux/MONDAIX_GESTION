@@ -58,7 +58,7 @@ export async function pageAsins(zone) {
   const filtre = paramUrl('filtre');
   const tri = TRIS[paramUrl('tri')] ? paramUrl('tri') : '';
   const seuil = lireSeuil();
-  const [liste, ecarts, refs] = await Promise.all([api('/api/produits'), api('/api/ecarts-couts'), references()]);
+  const [liste, ecarts, refs, imports] = await Promise.all([api('/api/produits'), api('/api/ecarts-couts'), references(), api('/api/imports/inventaire')]);
   const asinsEcart = new Set(ecarts.map((e) => e.asin));
   const filtres = {
     '': ['Tous', () => true],
@@ -131,7 +131,19 @@ export async function pageAsins(zone) {
     <p class="aide">Stock total = chez Amazon (dernier import, qui remplace le précédent) + en transit + à envoyer. Le stock chez Amazon fait partie des unités achetées :
       à envoyer = achetées sur factures − unités sorties (envoyées, ou vues chez Amazon, en transit ou vendues). « Amazon > acheté » signale une facture probablement manquante.</p>
     <details class="carte" id="bloc-import" ${importEnCours() ? 'open' : ''}><summary><strong>Importer le fichier d’inventaire</strong> (colonne cost = coût d’achat unitaire HT)</summary>
-      <div id="inventaire" class="pile">${rendreInventaire()}</div></details>`;
+      <div id="inventaire" class="pile">${rendreInventaire()}</div></details>
+
+    <h2>Imports d’inventaire Amazon (${imports.length})</h2>
+    <p class="aide">Chaque import remplace le stock chez Amazon. Le premier import est votre stock initial : aucune vente n’est comptée avant lui.
+      Supprimez un import fait par erreur : le stock redevient celui de l’import précédent et les coûts ajoutés par cet import sont retirés.</p>
+    ${tableau(
+      ['Date', 'Fichier', { t: 'ASIN', classe: 'num' }, { t: 'Unités', classe: 'num' }, { t: 'Coûts ajoutés', classe: 'num' }, '', { t: '', tri: false }],
+      imports.map((i) => `<tr><td>${date(i.date)}</td><td>${esc(i.nom || '#' + i.id)}</td><td class="num">${i.nb_asin}</td><td class="num">${i.unites}</td>
+        <td class="num">${i.nb_couts}</td>
+        <td>${i.stock_initial ? badge('Stock initial', 'info') : ''} ${i.dernier ? badge('Stock actuel', 'ok') : ''}</td>
+        <td class="actions-ligne"><button type="button" class="petit danger" data-suppr-import="${i.id}">${icone('trash-2')}Supprimer</button></td></tr>`),
+      'Aucun import : importez votre fichier d’inventaire Amazon ; le premier sera votre stock initial.',
+    )}`;
 
   const recherche = zone.querySelector('#recherche-asin');
   let delai;
@@ -151,6 +163,20 @@ export async function pageAsins(zone) {
     ecrireSeuil(v);
     rafraichir();
   };
+  zone.querySelectorAll('[data-suppr-import]').forEach((b) => {
+    b.onclick = async () => {
+      const i = imports.find((x) => String(x.id) === b.dataset.supprImport);
+      const ok = await confirmer({
+        titre: `Supprimer l’import « ${i.nom || '#' + i.id} » ?`,
+        message: `Import du ${date(i.date)} : ${i.nb_asin} ASIN, ${i.unites} unité(s)${i.nb_couts ? `, ${i.nb_couts} coût(s) ajouté(s)` : ''}.
+          ${i.dernier ? 'Le stock chez Amazon redeviendra celui de l’import précédent.' : ''}${i.stock_initial ? ' L’import suivant deviendra le stock initial.' : ''}
+          Les coûts ajoutés par cet import sont retirés ; si l’un d’eux était retenu, le coût précédent est repris.`,
+        libelle: 'Supprimer l’import',
+      });
+      if (!ok) return;
+      if ((await tenter(() => suppr(`/api/imports/inventaire/${i.id}`), 'Import supprimé.')) !== undefined) rafraichir();
+    };
+  });
   zone.querySelector('#ouvrir-import').onclick = () => {
     const bloc = zone.querySelector('#bloc-import');
     bloc.open = true;
@@ -252,7 +278,7 @@ export async function pageAsin(zone, asin) {
 
     ${p.historique_stock.length ? `<h2>Stock (imports du fichier d’inventaire)</h2>
     ${tableau(['Import', 'Date', { t: 'Quantité', classe: 'num' }, { t: 'Écart avec l’import précédent', classe: 'num' }],
-      p.historique_stock.map((h) => `<tr><td>${esc(h.nom || '#' + h.import_id)}</td><td>${date(h.date)}</td>
+      p.historique_stock.map((h, i) => `<tr><td>${esc(h.nom || '#' + h.import_id)}${i === p.historique_stock.length - 1 ? ' ' + badge('Stock initial', 'info') : ''}</td><td>${date(h.date)}</td>
         <td class="num">${h.quantite}</td><td class="num">${ecartTexte(h.ecart) || '—'}</td></tr>`))}` : ''}
 
     <h2>Coûts d’achat unitaires HT</h2>

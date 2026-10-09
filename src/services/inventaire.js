@@ -84,6 +84,59 @@ export function importerInventaire(db, { texte, mapping, nom }) {
   });
 }
 
+/** Imports d'inventaire, du plus récent au plus ancien. Le plus ancien avec des quantités = stock initial. */
+export function listerImportsInventaire(db) {
+  const imports = db
+    .prepare(
+      `SELECT i.id, i.nom, i.created_at AS date, i.nb_lignes,
+         (SELECT COUNT(*) FROM stock_releves s WHERE s.import_id = i.id) AS nb_asin,
+         (SELECT COALESCE(SUM(s.quantite), 0) FROM stock_releves s WHERE s.import_id = i.id) AS unites,
+         (SELECT COUNT(*) FROM couts_achat c WHERE c.import_id = i.id) AS nb_couts
+       FROM imports i WHERE i.type = 'inventaire' ORDER BY i.id DESC`,
+    )
+    .all();
+  const avecStock = imports.filter((i) => i.nb_asin > 0);
+  const initial = avecStock[avecStock.length - 1]?.id;
+  const dernier = avecStock[0]?.id;
+  return imports.map((i) => ({ ...i, stock_initial: i.id === initial, dernier: i.id === dernier }));
+}
+
+/**
+ * Supprime un import d'inventaire fait par erreur : sa photo du stock et les coûts qu'il a ajoutés.
+ * Si un de ces coûts était le coût retenu d'un ASIN, le coût précédent de l'historique est retenu.
+ * Le stock redevient celui de l'import précédent ; l'opération est journalisée.
+ */
+export function supprimerImportInventaire(db, id) {
+  const imp = db.prepare("SELECT * FROM imports WHERE id = ? AND type = 'inventaire'").get(id);
+  if (!imp) throw new ErreurMetier('Import introuvable.', 404);
+  return transaction(db, () => {
+    const releves = db.prepare('SELECT asin, quantite FROM stock_releves WHERE import_id = ?').all(id);
+    const couts = db.prepare('SELECT id, asin, montant_unitaire_ht FROM couts_achat WHERE import_id = ?').all(id);
+    const ids = new Set(couts.map((c) => c.id));
+    for (const asin of new Set(couts.map((c) => c.asin))) {
+      const p = db.prepare('SELECT cout_retenu_id FROM produits WHERE asin = ?').get(asin);
+      if (p && ids.has(p.cout_retenu_id)) {
+        const precedent = db
+          .prepare(`SELECT id FROM couts_achat WHERE asin = ? AND id NOT IN (${[...ids].map(() => '?').join(',')}) ORDER BY id DESC LIMIT 1`)
+          .get(asin, ...ids);
+        db.prepare("UPDATE produits SET cout_retenu_id = ?, updated_at = datetime('now') WHERE asin = ?").run(precedent?.id ?? null, asin);
+      }
+    }
+    db.prepare('DELETE FROM couts_achat WHERE import_id = ?').run(id);
+    db.prepare('DELETE FROM stock_releves WHERE import_id = ?').run(id);
+    db.prepare('DELETE FROM imports WHERE id = ?').run(id);
+    // Quantité d'inventaire mémorisée sur l'ASIN : celle du dernier import restant.
+    for (const { asin } of releves) {
+      const r = db
+        .prepare(`SELECT s.quantite FROM stock_releves s JOIN imports i ON i.id = s.import_id WHERE s.asin = ? AND i.type = 'inventaire' ORDER BY i.id DESC LIMIT 1`)
+        .get(asin);
+      db.prepare("UPDATE produits SET quantite_inventaire = ?, updated_at = datetime('now') WHERE asin = ?").run(r?.quantite ?? null, asin);
+    }
+    journaliser(db, 'import', id, 'suppression', { nom: imp.nom, date: imp.created_at, asin: releves.length, couts: couts.length });
+    return { asin: releves.length, couts: couts.length };
+  });
+}
+
 /* ------------------------------------------------------------------ stock */
 
 /** Imports d'inventaire contenant des quantités, du plus récent au plus ancien. */

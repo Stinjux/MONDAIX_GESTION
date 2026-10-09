@@ -92,6 +92,9 @@ Alternative cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.
 ### Stock
 
 - Chaque import du fichier d’inventaire Amazon **remplace** le stock chez Amazon (réimporter le même fichier ne change rien).
+- Le **premier import est le stock initial** : aucune vente n’est comptée avant lui.
+- Un import fait par erreur se **supprime** (page Stocks, « Imports d’inventaire Amazon ») : le stock redevient celui de
+  l’import précédent et les coûts ajoutés par cet import sont retirés (le coût précédent est repris s’il était retenu).
 - **Stock total** d’un ASIN = **chez Amazon** + **en transit** + **à envoyer**. Le stock chez Amazon fait partie des
   unités achetées, il ne s’y ajoute pas : à envoyer = unités des factures non annulées − unités sorties, où les sorties
   sont au moins les envois enregistrés et au moins ce qui est vu chez Amazon, en transit ou vendu (ventes estimées).

@@ -43,6 +43,8 @@ export function creerRoutes(db) {
   // Inventaire et coûts
   r('POST', '/api/imports/inventaire/analyser', ({ corps }) => inventaire.analyserInventaire(corps.texte));
   r('POST', '/api/imports/inventaire', ({ corps }) => inventaire.importerInventaire(db, corps));
+  r('GET', '/api/imports/inventaire', () => inventaire.listerImportsInventaire(db));
+  r('DELETE', '/api/imports/inventaire/:id', ({ p }) => inventaire.supprimerImportInventaire(db, +p.id));
   r('GET', '/api/produits', () => asins.listerAsins(db));
   r('GET', '/api/produits/:asin', ({ p }) => asins.ficheAsin(db, p.asin));
   r('PUT', '/api/produits/:asin', ({ p, corps }) => {
