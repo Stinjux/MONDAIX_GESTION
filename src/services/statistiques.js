@@ -1,7 +1,7 @@
 // Indicateurs du tableau de bord par période glissante, comparés à la période précédente.
 import { arrondir, normaliserReference } from '../lib/parse.js';
 import { totalFacture } from './commandes.js';
-import { etatStock } from './inventaire.js';
+import { etatStock, ventesEstimees } from './inventaire.js';
 
 export const PERIODES = {
   '7j': { jours: 7, libelle: '7 derniers jours' },
@@ -99,6 +99,27 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
     env[cle].unites += e.unites;
   }
 
+  // COGS : unités vendues (estimées par la baisse du stock entre deux imports d'inventaire)
+  // × coût d'achat unitaire HT retenu.
+  const couts = new Map(
+    db.prepare('SELECT p.asin, c.montant_unitaire_ht AS cout FROM produits p JOIN couts_achat c ON c.id = p.cout_retenu_id').all().map((r) => [r.asin, r.cout]),
+  );
+  const videCogs = () => ({ montant: 0, unites: 0, sans_cout: 0, parAsin: new Map() });
+  const cogs = { courant: videCogs(), precedent: videCogs() };
+  for (const v of ventesEstimees(db)) {
+    const cle = dans(v.date, debut, fin) ? 'courant' : dans(v.date, debutPrecedent, debut) ? 'precedent' : null;
+    if (!cle) continue;
+    const cout = couts.get(v.asin);
+    const a = cogs[cle];
+    a.unites += v.vendues;
+    if (cout === undefined) a.sans_cout += v.vendues;
+    else a.montant += v.vendues * cout;
+    const ligne = a.parAsin.get(v.asin) || { asin: v.asin, unites: 0, cout_unitaire: cout ?? null, montant: 0 };
+    ligne.unites += v.vendues;
+    ligne.montant = cout === undefined ? null : arrondir(ligne.unites * cout);
+    a.parAsin.set(v.asin, ligne);
+  }
+
   // Stock : dernier import du fichier d'inventaire, comparé à l'import précédent
   const st = etatStock(db);
   const stock = st.dernier
@@ -127,6 +148,12 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
       envois: variation(env.courant.envois, env.precedent.envois),
       unites_envoyees: variation(env.courant.unites, env.precedent.unites),
       stock,
+      cogs: {
+        ...variation(arrondir(cogs.courant.montant), arrondir(cogs.precedent.montant)),
+        unites_vendues: variation(cogs.courant.unites, cogs.precedent.unites),
+        unites_sans_cout: cogs.courant.sans_cout,
+        par_asin: [...cogs.courant.parAsin.values()].sort((a, b) => (b.montant ?? -1) - (a.montant ?? -1) || b.unites - a.unites),
+      },
     },
   };
 }

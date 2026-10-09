@@ -116,6 +116,36 @@ export function etatStock(db) {
   return { dernier, precedent: precedent || null, parAsin };
 }
 
+/**
+ * Unités vendues estimées entre deux imports d'inventaire consécutifs (stock Amazon) :
+ * stock précédent + unités expédiées à Amazon entre les deux imports − stock actuel (jamais négatif).
+ * Les ventes sont datées du jour de l'import qui les constate. Un ASIN absent d'un import compte pour 0.
+ */
+export function ventesEstimees(db) {
+  const imports = importsStock(db).reverse();
+  const qte = db.prepare('SELECT asin, quantite FROM stock_releves WHERE import_id = ?');
+  const envoyees = db.prepare(
+    `SELECT el.asin, SUM(el.quantite) AS unites FROM envoi_lignes el JOIN envois e ON e.id = el.envoi_id
+     WHERE e.statut <> 'en_preparation' AND COALESCE(e.date_envoi, date(e.created_at)) > ? AND COALESCE(e.date_envoi, date(e.created_at)) <= ?
+     GROUP BY el.asin`,
+  );
+  const ventes = [];
+  for (let i = 1; i < imports.length; i++) {
+    const avant = imports[i - 1];
+    const apres = imports[i];
+    const du = String(avant.date).slice(0, 10);
+    const au = String(apres.date).slice(0, 10);
+    const qAvant = new Map(qte.all(avant.import_id).map((r) => [r.asin, r.quantite]));
+    const qApres = new Map(qte.all(apres.import_id).map((r) => [r.asin, r.quantite]));
+    const entrees = new Map(envoyees.all(du, au).map((r) => [r.asin, r.unites]));
+    for (const asin of new Set([...qAvant.keys(), ...qApres.keys(), ...entrees.keys()])) {
+      const vendues = (qAvant.get(asin) ?? 0) + (entrees.get(asin) ?? 0) - (qApres.get(asin) ?? 0);
+      if (vendues > 0) ventes.push({ asin, date: au, vendues, import_id: apres.import_id });
+    }
+  }
+  return ventes;
+}
+
 /** Évolution du stock d'un ASIN, import par import. */
 export function historiqueStockAsin(db, asin) {
   const imports = importsStock(db).reverse();

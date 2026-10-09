@@ -40,6 +40,8 @@ function rendreIndicateurs(s) {
       ${indicateur(nombre.format(i.unites_commandees.courant), 'Unités commandées', i.unites_commandees, { precedente })}
       ${indicateur(nombre.format(i.envois.courant), 'Envois Amazon expédiés', i.envois, { precedente })}
       ${indicateur(nombre.format(i.unites_envoyees.courant), 'Unités envoyées à Amazon', i.unites_envoyees, { precedente })}
+      ${indicateur(montant(i.cogs.courant), 'COGS (coût des unités vendues)', i.cogs, { argent: true, precedente })}
+      ${indicateur(nombre.format(i.cogs.unites_vendues.courant), 'Unités vendues (estimées)', i.cogs.unites_vendues, { precedente })}
       ${i.stock
         ? indicateur(nombre.format(i.stock.courant), `Unités en stock (import du ${date(i.stock.date_import)})`, i.stock, {
             stock: true,
@@ -49,7 +51,17 @@ function rendreIndicateurs(s) {
     </div>
     <p class="aide">Du ${date(s.du)} (exclu) au ${date(s.au)}. Dépenses : ${montant(i.depenses.dont_commandes)} de commandes (prix total du Google Sheets${
       i.depenses.commandes_sans_total ? `, ou facture pour ${i.depenses.commandes_sans_total} commande(s) sans prix total` : ''
-    }) + ${montant(i.depenses.dont_factures)} de ${i.depenses.nb_factures} facture(s) enregistrée(s) seule(s) ; une facture portant le n° d’une commande existante n’est comptée qu’une fois. Les commandes passées et unités commandées incluent ces factures. Stock : dernier import du fichier d’inventaire, comparé à l’import précédent (indépendant de la période).</p>`;
+    }) + ${montant(i.depenses.dont_factures)} de ${i.depenses.nb_factures} facture(s) enregistrée(s) seule(s) ; une facture portant le n° d’une commande existante n’est comptée qu’une fois. Les commandes passées et unités commandées incluent ces factures. Stock : dernier import du fichier d’inventaire, comparé à l’import précédent (indépendant de la période).</p>
+    <h2>COGS de la période</h2>
+    <p class="aide">Unités vendues estimées à chaque import d’inventaire : stock précédent + unités expédiées à Amazon entre les deux imports − stock actuel.
+      COGS = unités vendues × coût d’achat unitaire HT retenu. Importez l’inventaire régulièrement (page ASIN) pour un suivi précis.${
+      i.cogs.unites_sans_cout ? ` <strong>${i.cogs.unites_sans_cout} unité(s) vendue(s) sans coût d’achat retenu : non comptées dans le COGS.</strong>` : ''}</p>
+    ${tableau(
+      ['ASIN', { t: 'Unités vendues', classe: 'num' }, { t: 'Coût d’achat HT / unité', classe: 'num' }, { t: 'COGS', classe: 'num' }],
+      i.cogs.par_asin.map((a) => `<tr><td>${asinLien(a.asin)}</td><td class="num">${nombre.format(a.unites)}</td>
+        <td class="num">${a.cout_unitaire === null ? badge('sans coût', 'alerte') : montant(a.cout_unitaire)}</td><td class="num">${montant(a.montant)}</td></tr>`),
+      'Aucune vente constatée sur la période (il faut au moins deux imports d’inventaire).',
+    )}`;
 }
 
 export async function pageTableauDeBord(zone) {

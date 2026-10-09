@@ -5,38 +5,61 @@ import { rendreInventaire, brancherInventaire } from './produits.js';
 const TONS_DOSSIER = { a_demander: 'alerte', demande_envoyee: 'info', documents_requis: 'alerte', approuve: 'ok', refuse: 'erreur' };
 const etat = { recherche: '' };
 
-function filtreUrl() {
-  return new URLSearchParams(location.hash.split('?')[1] || '').get('filtre') || '';
+function paramUrl(nom) {
+  return new URLSearchParams(location.hash.split('?')[1] || '').get(nom) || '';
 }
+
+function lienListe(filtre, tri) {
+  const q = new URLSearchParams();
+  if (filtre) q.set('filtre', filtre);
+  if (tri) q.set('tri', tri);
+  return `#/asins${q.size ? '?' + q : ''}`;
+}
+
+// Actif : au moins une unité en stock au dernier import d'inventaire ; inactif : 0 (ou jamais importé).
+const estActif = (p) => p.stock?.quantite > 0;
+
+const TRIS = {
+  '': ['Dernière commande', null],
+  variation: ['Plus grande variation de stock', (a, b) => Math.abs(b.stock?.ecart ?? -1) - Math.abs(a.stock?.ecart ?? -1)],
+  cout: ['Coût unitaire le plus bas', (a, b) => (a.cout_retenu ?? Infinity) - (b.cout_retenu ?? Infinity)],
+};
 
 /* ------------------------------------------------------------------ liste */
 
 export async function pageAsins(zone) {
-  const filtre = filtreUrl();
+  const filtre = paramUrl('filtre');
+  const tri = TRIS[paramUrl('tri')] ? paramUrl('tri') : '';
   const [liste, ecarts, refs] = await Promise.all([api('/api/produits'), api('/api/ecarts-couts'), references()]);
   const asinsEcart = new Set(ecarts.map((e) => e.asin));
   const filtres = {
     '': ['Tous', () => true],
-    stock: ['En stock', (p) => p.stock?.quantite > 0],
+    actifs: ['Actifs (en stock)', estActif],
+    inactifs: ['Inactifs (0 en stock)', (p) => !estActif(p)],
     ecarts: ['Écarts de coût', (p) => asinsEcart.has(p.asin)],
     sans_cout: ['Sans coût d’achat', (p) => p.cout_retenu === null],
     autorisation: ['Autorisation non confirmée', (p) => !p.autorisation?.confirme],
   };
   const q = etat.recherche.toLowerCase();
   const visibles = liste.filter((p) => (filtres[filtre] || filtres[''])[1](p) && (!q || [p.asin, p.titre, p.sku].some((v) => String(v || '').toLowerCase().includes(q))));
+  if (TRIS[tri][1]) visibles.sort(TRIS[tri][1]);
 
   zone.innerHTML = `
     <div class="entete"><div><h1>ASIN</h1>
       <p class="aide">Cliquez sur un ASIN pour ouvrir sa page Amazon, ou sur « fiche » pour voir tout son historique : commandes, factures, coûts, réceptions, envois, autorisation et emails.</p></div></div>
     <div class="actions" style="margin-bottom:8px">
-      <div><label for="recherche-asin">Rechercher (ASIN, titre, SKU)</label><input id="recherche-asin" value="${esc(etat.recherche)}" placeholder="ex. B0…"></div>
+      <div><label for="recherche-asin">Rechercher (ASIN, titre, SKU)</label><input id="recherche-asin" type="search" value="${esc(etat.recherche)}" placeholder="ex. B0…"></div>
+      <div><label for="tri-asin">Trier par</label><select id="tri-asin">${Object.entries(TRIS)
+        .map(([t, [l]]) => `<option value="${t}" ${t === tri ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
     </div>
     <div class="onglets">${Object.entries(filtres)
-      .map(([f, [t, fn]]) => `<a href="#/asins${f ? '?filtre=' + f : ''}" class="${f === filtre ? 'actif' : ''}">${t} (${liste.filter(fn).length})</a>`)
+      .map(([f, [t, fn]]) => `<a href="${lienListe(f, tri)}" class="${f === filtre ? 'actif' : ''}">${t} (${liste.filter(fn).length})</a>`)
       .join('')}</div>
+    <p class="aide">${visibles.length} ASIN affiché(s)${q ? ` pour « ${esc(etat.recherche)} »` : ''}.</p>
     ${tableau(
       [
         'ASIN',
+        'État',
         'Titre',
         { t: 'Coût HT retenu', classe: 'num' },
         { t: 'Commandé', classe: 'num' },
@@ -53,6 +76,7 @@ export async function pageAsins(zone) {
         const a = p.autorisation;
         return `<tr>
           <td>${asinLien(p.asin)}</td>
+          <td>${estActif(p) ? badge('actif', 'ok') : badge('inactif')}</td>
           <td>${esc(p.titre || '')}${p.sku ? `<div class="aide" style="margin:0">SKU ${esc(p.sku)}</div>` : ''}</td>
           <td class="num">${montant(p.cout_retenu)}${asinsEcart.has(p.asin) ? '<br>' + badge('écart', 'alerte') : ''}</td>
           <td class="num">${p.unites_commandees}</td><td class="num">${p.unites_recues}</td><td class="num">${p.unites_envoyees}</td>
@@ -66,11 +90,23 @@ export async function pageAsins(zone) {
       'Aucun ASIN.',
     )}
     <p class="aide">Dépensé (factures) = part des factures associées à l’ASIN, taxes, livraison et frais compris (répartis au prorata du montant HT des articles de chaque facture).
-      Valeur achats (est.) = coût d’achat HT retenu × unités commandées. Stock : quantité du dernier import du fichier d’inventaire, avec l’écart depuis l’import précédent.</p>
+      Valeur achats (est.) = coût d’achat HT retenu × unités commandées. Stock : quantité du dernier import du fichier d’inventaire, avec l’écart depuis l’import précédent. Actif = au moins 1 unité en stock ; inactif = 0.</p>
     <details class="carte"><summary><strong>Importer le fichier d’inventaire</strong> (colonne cost = coût d’achat unitaire HT)</summary>
       <div id="inventaire" style="margin-top:10px">${rendreInventaire()}</div></details>`;
 
-  zone.querySelector('#recherche-asin').onchange = (e) => ((etat.recherche = e.target.value), rafraichir());
+  const recherche = zone.querySelector('#recherche-asin');
+  let delai;
+  recherche.oninput = () => {
+    clearTimeout(delai);
+    delai = setTimeout(async () => {
+      etat.recherche = recherche.value;
+      await rafraichir();
+      const champ = document.getElementById('recherche-asin');
+      champ?.focus();
+      champ?.setSelectionRange(champ.value.length, champ.value.length);
+    }, 300);
+  };
+  zone.querySelector('#tri-asin').onchange = (e) => (location.hash = lienListe(filtre, e.target.value));
   brancherInventaire(zone);
 }
 

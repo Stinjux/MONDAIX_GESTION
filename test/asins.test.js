@@ -220,3 +220,22 @@ test('envoi : n° et date d’expédition saisis à la main, ASIN ajoutés puis 
   assert.equal(e.lignes[0].quantite, 7);
   assert.equal(statistiques(db, '30j', new Date('2026-10-08T12:00:00Z')).indicateurs.unites_envoyees.courant, 7);
 });
+
+test('COGS : ventes estimées par la baisse du stock entre deux imports × coût d’achat HT retenu', async () => {
+  const { modifierEnvoi } = await import('../src/services/envois.js');
+  const { ajouterCout } = await import('../src/services/couts.js');
+  ajouterCout(db, { asin: 'B0AAAAAAA1', montant: 4, source: 'manuel' });
+  inv(db, 'asin,qte\nB0AAAAAAA1,10\nB0AAAAAAA2,5', 'inv1');
+  db.prepare("UPDATE imports SET created_at = '2026-10-01 09:00:00' WHERE nom = 'inv1'").run();
+  // 6 unités envoyées à Amazon entre les deux imports
+  const e = creerEnvoi(db, { lignes: [{ asin: 'B0AAAAAAA1', quantite: 6 }] });
+  modifierEnvoi(db, e, { date_envoi: '2026-10-03', statut: 'expedie' });
+  inv(db, 'asin,qte\nB0AAAAAAA1,12\nB0AAAAAAA2,7', 'inv2');
+  db.prepare("UPDATE imports SET created_at = '2026-10-05 09:00:00' WHERE nom = 'inv2'").run();
+  const c = statistiques(db, '30j', new Date('2026-10-08T12:00:00Z')).indicateurs.cogs;
+  // A : 10 + 6 − 12 = 4 vendues × 4 $ ; B : stock en hausse sans envoi → aucune vente
+  assert.equal(c.unites_vendues.courant, 4);
+  assert.equal(c.courant, 16);
+  assert.equal(c.unites_sans_cout, 0);
+  assert.deepEqual(c.par_asin, [{ asin: 'B0AAAAAAA1', unites: 4, cout_unitaire: 4, montant: 16 }]);
+});
