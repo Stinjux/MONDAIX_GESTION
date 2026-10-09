@@ -49,5 +49,16 @@ export function resumeImports(db) {
        FROM imports i WHERE i.type = 'sheets' AND i.empreinte IS NOT NULL ORDER BY i.id DESC LIMIT 1`,
     )
     .get();
-  return { frequence_jours: FREQUENCE_JOURS, inventaire: etat(inventaire), ventes: etat(ventes), achats: etat(achats) };
+  // Google Sheet : un fichier par mois, dernier import de chaque mois.
+  const mois = db
+    .prepare(
+      `SELECT i.periode, i.nom, i.created_at AS date,
+         (SELECT COUNT(*) FROM factures f WHERE f.cle_import LIKE 'sheet|' || i.periode || '|%' AND f.annulee = 0) AS factures
+       FROM imports i
+       WHERE i.type = 'sheets' AND i.periode IS NOT NULL
+         AND i.id = (SELECT MAX(j.id) FROM imports j WHERE j.type = 'sheets' AND j.periode = i.periode)
+       ORDER BY i.periode DESC`,
+    )
+    .all();
+  return { frequence_jours: FREQUENCE_JOURS, inventaire: etat(inventaire), ventes: etat(ventes), achats: { ...etat(achats), mois } };
 }

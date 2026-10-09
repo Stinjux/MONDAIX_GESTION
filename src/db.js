@@ -324,6 +324,7 @@ const COLONNES_AJOUTEES = [
   ['factures', 'cle_import', 'TEXT'], // ligne du Google Sheet d'achats qui l'a créée
   ['imports', 'empreinte', 'TEXT'], // SHA-256 du fichier : un même fichier n'est importé qu'une fois
   ['imports_ventes', 'empreinte', 'TEXT'],
+  ['imports', 'periode', 'TEXT'], // Google Sheet d'achats : mois du fichier (AAAA-MM)
 ];
 
 function ajouterColonnesManquantes(db) {

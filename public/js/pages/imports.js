@@ -37,7 +37,18 @@ function details(type, e) {
   if (!e.date) return '';
   if (type === 'inventaire') return `${esc(e.nom || '')} · ${nombre.format(e.unites)} unité(s) chez Amazon sur ${e.asin} ASIN`;
   if (type === 'ventes') return `${esc(e.nom || '')} · ventes connues du ${date(e.ventes_depuis)} au ${date(e.ventes_jusqu_au)}`;
-  return `${esc(e.nom || '')} · ${e.factures} achat(s) du Sheet${e.en_attente ? `, dont ${e.en_attente} en attente du fournisseur` : ''}`;
+  return `${e.factures} achat(s) du Sheet${e.en_attente ? `, dont ${e.en_attente} en attente du fournisseur` : ''}`;
+}
+
+const NOMS_MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+const libelleMois = (p) => `${NOMS_MOIS[Number(p.slice(5, 7)) - 1] || ''} ${p.slice(0, 4)}`;
+
+/** Fichiers mensuels du Sheet : dernier import de chaque mois. */
+function listeMois(mois) {
+  if (!mois?.length) return '';
+  return `<ul class="liste-mois">${mois
+    .map((m) => `<li><strong>${esc(libelleMois(m.periode))}</strong><span>${esc(m.nom)}</span><span class="aide">${date(m.date)} · ${m.factures} achat(s)</span></li>`)
+    .join('')}</ul>`;
 }
 
 function carte(type, e, frequence) {
@@ -47,8 +58,9 @@ function carte(type, e, frequence) {
       <div class="tuile-tete"><h2 id="titre-${type}" class="sans-marge">${esc(f.titre)}</h2>${icone(f.icone, 20)}</div>
       <p class="carte-import-date"><strong>${quand(e)}</strong> ${etat}</p>
       <p class="aide">${details(type, e) || '&nbsp;'}</p>
+      ${type === 'achats' ? listeMois(e.mois) : ''}
       <label class="depot" for="fichier-${type}" data-depot="${type}">${icone('upload', 20)}<span>Glissez le fichier ici ou cliquez pour le choisir</span>
-        <input type="file" id="fichier-${type}" data-type="${type}" accept=".csv,.tsv,.txt"></label>
+        <input type="file" id="fichier-${type}" data-type="${type}" accept=".csv,.tsv,.txt" multiple></label>
       <p class="aide">${esc(f.source)}</p>
       <p><a href="${f.lien[0]}">${esc(f.lien[1])}</a></p>
     </section>`;
@@ -58,7 +70,8 @@ function carte(type, e, frequence) {
 function resume(type, r) {
   if (type === 'achats') {
     const lignes = [
-      `${r.creees} achat(s) ajouté(s), ${r.mises_a_jour} mis à jour, ${r.inchangees} inchangé(s)`,
+      `${r.mois}${r.mois_deduit ? ' (mois déduit des dates)' : ''} : ${r.creees} achat(s) ajouté(s), ${r.mises_a_jour} mis à jour, ${r.inchangees} inchangé(s)`,
+      r.retirees ? `${r.retirees} retiré(s) du Sheet : annulé(s), gardé(s) dans l’historique` : '',
       r.en_attente ? `${r.en_attente} en attente du fournisseur` : '',
       r.annulees ? `${r.annulees} annulé(s) / remboursé(s)` : '',
     ].filter(Boolean);
@@ -148,7 +161,7 @@ export async function pageImports(zone) {
       ${rendreJournal()}
       <h2>Sans doublon</h2>
       <ul class="aide">
-        <li><strong>Google Sheet</strong> : chaque ligne devient un achat ; réimporter le Sheet met à jour les achats existants (quantité, total, statut, date corrigée) sans jamais en créer deux. Le total est TTC ; le montant HT en est déduit (TPS + TVQ, réglable dans Paramètres). Pour le statut, ajoutez une colonne F « Statut » : reçu, en attente ou annulé (les couleurs ne sont pas exportées en CSV).</li>
+        <li><strong>Google Sheet</strong> : un fichier par mois, reconnu à son nom (« AUGUST orders », « SEPTEMBER orders »…). Pour un mois, le dernier fichier importé fait foi : lignes ajoutées → achats créés, lignes modifiées → mises à jour, lignes retirées → achats annulés (gardés dans l’historique) ; jamais de doublon, et les autres mois ne sont pas touchés. Le total est TTC ; le montant HT en est déduit (TPS + TVQ, réglable dans Paramètres). Pour le statut, ajoutez une colonne F « Statut » : reçu, en attente ou annulé (les couleurs ne sont pas exportées en CSV).</li>
         <li><strong>Aura</strong> : chaque import est une photo complète du stock Amazon ; seule la variation avec la photo précédente compte. Un fichier identique au dernier import est refusé, et un nouvel import le même jour remplace celui du jour.</li>
         <li><strong>Rapport de commandes</strong> : une commande déjà importée est mise à jour, jamais comptée deux fois ; des périodes qui se chevauchent ne posent donc aucun problème.</li>
       </ul>

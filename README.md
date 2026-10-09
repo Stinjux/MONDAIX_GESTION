@@ -100,8 +100,10 @@ Les trois fichiers se déposent au même endroit, ensemble ou séparément ; leu
 La page indique la date du dernier import de chacun et signale ceux de plus de 7 jours (mise à jour conseillée chaque lundi).
 
 - **Google Sheet d’achats** (CSV, avec ou sans en-tête : ASIN, site, quantité, total TTC, date, statut facultatif) :
-  chaque ligne devient une facture « Google Sheet ». Réimporter met à jour la facture de la ligne (quantité, total, statut,
-  date ou site corrigés) sans jamais en créer une seconde ; une ligne retirée du Sheet ne supprime aucune facture.
+  un fichier par mois, reconnu à son nom (« OCTOBER orders », « septembre 2026 »… ; sinon mois le plus fréquent des dates).
+  Chaque ligne devient une facture « Google Sheet ». Pour un mois, le dernier fichier importé fait foi : ligne ajoutée →
+  facture créée ; ligne modifiée (quantité, total, statut, date ou site) → facture mise à jour, jamais en double ;
+  ligne retirée → facture annulée (gardée dans l’historique, rétablie si la ligne revient). Les autres mois ne sont pas touchés.
   HT = total ÷ (1 + taux de taxes, 14,975 % par défaut, réglable dans Paramètres). Aucun coût unitaire n’est déduit du Sheet.
   Statut : reçu (défaut), en attente du fournisseur (hors stock « à envoyer »), annulé / remboursé (facture annulée).
 - **Inventaire Aura** : un fichier identique au dernier import est refusé ; un nouvel import avec quantités le même jour

@@ -76,55 +76,118 @@ function fournisseurPour(db, site, cache) {
   return f.id;
 }
 
+const MOIS = [
+  ['january', 'janvier', 'jan', 'janv'],
+  ['february', 'fevrier', 'feb', 'fev', 'fevr'],
+  ['march', 'mars', 'mar'],
+  ['april', 'avril', 'apr', 'avr'],
+  ['may', 'mai'],
+  ['june', 'juin', 'jun'],
+  ['july', 'juillet', 'jul', 'juil'],
+  ['august', 'aout', 'aug'],
+  ['september', 'septembre', 'sep', 'sept'],
+  ['october', 'octobre', 'oct'],
+  ['november', 'novembre', 'nov'],
+  ['december', 'decembre', 'dec'],
+];
+const NOMS_MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+
+/** « 2026-10 » → « octobre 2026 ». */
+export function libelleMois(periode) {
+  const [a, m] = String(periode || '').split('-');
+  return NOMS_MOIS[Number(m) - 1] ? `${NOMS_MOIS[Number(m) - 1]} ${a}` : periode;
+}
+
+/**
+ * Mois couvert par un fichier du Sheet (un onglet par mois : « OCTOBER orders ») → « AAAA-MM ».
+ * Mois lu dans le nom du fichier ; année lue dans le nom, sinon celle des dates du mois dans le fichier,
+ * sinon l'année en cours. Sans mois dans le nom : mois le plus fréquent parmi les dates des achats.
+ */
+export function moisDuFichier(nom, dates = [], maintenant = new Date()) {
+  const mots = normaliserTexte(String(nom || '').replace(/\.(csv|tsv|txt)$/i, '')).split(' ');
+  const mois = MOIS.findIndex((noms) => mots.some((m) => noms.includes(m)));
+  const anneeNom = mots.find((m) => /^20\d\d$/.test(m));
+  const plusFrequent = (valeurs) => {
+    const n = new Map();
+    for (const v of valeurs) n.set(v, (n.get(v) || 0) + 1);
+    return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  };
+  if (mois >= 0) {
+    const mm = String(mois + 1).padStart(2, '0');
+    const annee = anneeNom || plusFrequent(dates.filter((d) => d.slice(5, 7) === mm).map((d) => d.slice(0, 4))) || String(maintenant.getFullYear());
+    return { periode: `${annee}-${mm}`, deduit: false };
+  }
+  const p = plusFrequent(dates.map((d) => d.slice(0, 7)));
+  return p ? { periode: anneeNom ? `${anneeNom}-${p.slice(5)}` : p, deduit: true } : null;
+}
+
+/**
+ * Import d'un fichier mensuel du Sheet. Pour un même mois, le dernier fichier importé fait foi :
+ * lignes ajoutées → achats créés, lignes modifiées → mises à jour, lignes retirées → factures annulées
+ * (gardées dans l'historique, rétablies si la ligne revient). Les autres mois ne sont jamais touchés.
+ */
 export function importerAchats(db, { texte, nom }) {
   const lignes = parserCsv(texte);
   if (!lignes.length) throw new ErreurMetier('Fichier vide.');
   const { map, debut } = reperer(lignes);
   const empreinte = empreinteTexte(texte);
-  const dernier = db.prepare("SELECT nom, created_at, empreinte FROM imports WHERE type = 'sheets' ORDER BY id DESC LIMIT 1").get();
-  if (dernier?.empreinte === empreinte) {
-    throw new ErreurMetier(`Fichier identique au dernier import du Sheet (${dernier.nom}, ${dernier.created_at.slice(0, 10)}) : rien n’a changé.`, 409);
-  }
   const taux = Number(lireParametre(db, 'achats.taux_taxes') ?? 14.975) / 100;
   const val = (l, champ) => (map[champ] === undefined ? '' : String(l[map[champ]] ?? '').trim());
 
+  // 1er passage : lignes valides.
+  const r = { creees: 0, mises_a_jour: 0, inchangees: 0, en_attente: 0, annulees: 0, retirees: 0, a_verifier: [], rejets: [] };
+  const achats = [];
+  lignes.slice(debut).forEach((l, i) => {
+    const n = i + debut + 1; // n° de ligne dans le Sheet
+    const asin = normaliserAsin(val(l, 'asin'));
+    if (!asin) return; // ligne vide, légende, totaux…
+    const quantite = parserQuantite(val(l, 'quantite'));
+    const total = parserMontant(val(l, 'total'));
+    const date = parserDate(val(l, 'date'));
+    if (!quantite) return void r.rejets.push({ ligne: n, asin, motif: 'quantité vide ou à 0 : ligne ignorée' });
+    if (total === null) return void r.rejets.push({ ligne: n, asin, motif: `total illisible « ${val(l, 'total')} » : ligne ignorée` });
+    if (total === 0) r.a_verifier.push({ ligne: n, asin, motif: 'total à 0 $' });
+    if (!date) r.a_verifier.push({ ligne: n, asin, motif: 'date manquante ou illisible' });
+    const statut = map.statut === undefined ? 'recu' : statutAchat(val(l, 'statut')) || 'recu';
+    achats.push({ n, asin, quantite, total, date, statut, site: val(l, 'site') });
+  });
+
+  // Mois du fichier (un fichier par mois) : les clés et les lignes retirées sont propres à ce mois.
+  const mois = moisDuFichier(nom, achats.map((a) => a.date).filter(Boolean));
+  if (!mois) throw new ErreurMetier('Mois introuvable : nommez le fichier d’après son mois (ex. « OCTOBER orders ») ou datez les achats.');
+  const { periode } = mois;
+  const dernier = db
+    .prepare("SELECT nom, created_at, empreinte FROM imports WHERE type = 'sheets' AND periode = ? ORDER BY id DESC LIMIT 1")
+    .get(periode);
+  if (dernier?.empreinte === empreinte) {
+    throw new ErreurMetier(`Fichier identique au dernier import de ${libelleMois(periode)} (${dernier.nom}, ${dernier.created_at.slice(0, 10)}) : rien n’a changé.`, 409);
+  }
+
   return transaction(db, () => {
     const imp = db
-      .prepare("INSERT INTO imports (type, nom, mapping, entetes, nb_lignes, empreinte) VALUES ('sheets', ?, ?, '[]', ?, ?)")
-      .run(nom || 'Google Sheet achats', JSON.stringify(map), lignes.length - debut, empreinte);
+      .prepare("INSERT INTO imports (type, nom, mapping, entetes, nb_lignes, empreinte, periode) VALUES ('sheets', ?, ?, '[]', ?, ?, ?)")
+      .run(nom || 'Google Sheet achats', JSON.stringify(map), lignes.length - debut, empreinte, periode);
     const importId = Number(imp.lastInsertRowid);
-    const r = { import_id: importId, creees: 0, mises_a_jour: 0, inchangees: 0, en_attente: 0, annulees: 0, a_verifier: [], rejets: [] };
+    Object.assign(r, { import_id: importId, periode, mois: libelleMois(periode), mois_deduit: mois.deduit });
     const fournisseurs = new Map();
     const occurrences = new Map();
     const parCle = db.prepare('SELECT * FROM factures WHERE cle_import = ?');
 
-    // 1er passage : lignes valides et leur clé stable (ASIN, site, date, + rang si répétée).
-    const achats = [];
-    lignes.slice(debut).forEach((l, i) => {
-      const n = i + debut + 1; // n° de ligne dans le Sheet
-      const asin = normaliserAsin(val(l, 'asin'));
-      if (!asin) return; // ligne vide, légende, totaux…
-      const quantite = parserQuantite(val(l, 'quantite'));
-      const total = parserMontant(val(l, 'total'));
-      const date = parserDate(val(l, 'date'));
-      if (!quantite) return void r.rejets.push({ ligne: n, asin, motif: 'quantité vide ou à 0 : ligne ignorée' });
-      if (total === null) return void r.rejets.push({ ligne: n, asin, motif: `total illisible « ${val(l, 'total')} » : ligne ignorée` });
-      if (total === 0) r.a_verifier.push({ ligne: n, asin, motif: 'total à 0 $' });
-      if (!date) r.a_verifier.push({ ligne: n, asin, motif: 'date manquante ou illisible' });
-      const statut = map.statut === undefined ? 'recu' : statutAchat(val(l, 'statut')) || 'recu';
-      const base = ['sheet', asin, normaliserTexte(val(l, 'site')), date || ''].join('|');
+    // Clé stable d'une ligne : mois du fichier, ASIN, site, date (+ rang si la combinaison se répète).
+    for (const a of achats) {
+      const base = ['sheet', periode, a.asin, normaliserTexte(a.site), a.date || ''].join('|');
       const rang = (occurrences.get(base) || 0) + 1;
       occurrences.set(base, rang);
-      achats.push({ n, asin, quantite, total, date, statut, site: val(l, 'site'), cle: `${base}|${rang}` });
-    });
+      a.cle = `${base}|${rang}`;
+    }
     const clesDuFichier = new Set(achats.map((a) => a.cle));
-    // Factures du Sheet dont la clé n'est plus dans le fichier : date ou site corrigé dans le Sheet ?
+    // Factures de ce mois dont la clé n'est plus dans le fichier : date ou site corrigé, ou ligne retirée.
     const orphelines = db
       .prepare(
         `SELECT f.*, fl.quantite AS q, fl.asin AS a FROM factures f JOIN facture_lignes fl ON fl.facture_id = f.id
-         WHERE f.cle_import LIKE 'sheet|%'`,
+         WHERE f.cle_import LIKE 'sheet|' || ? || '|%'`,
       )
-      .all()
+      .all(periode)
       .filter((f) => !clesDuFichier.has(f.cle_import));
 
     // 2e passage : création ou mise à jour.
@@ -179,6 +242,13 @@ export function importerAchats(db, { texte, nom }) {
       db.prepare('UPDATE factures SET en_attente = ? WHERE id = ?').run(a.statut === 'en_attente' ? 1 : 0, id);
       if (a.statut === 'en_attente') r.en_attente++;
       if (a.statut === 'annule') r.annulees++;
+    }
+    // Lignes retirées du fichier de ce mois : annulées (gardées dans l'historique), jamais supprimées.
+    const motifRetrait = `Retirée du Google Sheet (${nom || libelleMois(periode)})`;
+    for (const f of orphelines) {
+      if (f.annulee) continue;
+      annulerFacture(db, f.id, { motif: motifRetrait });
+      r.retirees++;
     }
     journaliser(db, 'import', importId, 'achats_sheet', { nom, creees: r.creees, mises_a_jour: r.mises_a_jour, rejets: r.rejets.length });
     return r;

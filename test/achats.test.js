@@ -91,3 +91,52 @@ test('type de fichier reconnu et date du dernier import de chacun', () => {
   assert.deepEqual([r.ventes.nom, r.ventes.ventes_jusqu_au], ['commandes.txt', '2026-10-06']);
   assert.deepEqual([r.achats.nom, r.achats.factures], ['achats.csv', 3]);
 });
+
+test('mois du fichier : lu dans le nom (anglais ou français), année des dates, sinon déduit des dates', async () => {
+  const { moisDuFichier } = await import('../src/services/achats.js');
+  const now = new Date('2026-10-09T12:00:00Z');
+  assert.deepEqual(moisDuFichier('Mondaix - OCTOBER orders.csv', ['2026-10-03'], now), { periode: '2026-10', deduit: false });
+  assert.deepEqual(moisDuFichier('AUGUST orders.csv', [], now), { periode: '2026-08', deduit: false });
+  assert.deepEqual(moisDuFichier('décembre 2025.csv', ['2026-01-02'], now), { periode: '2025-12', deduit: false });
+  assert.deepEqual(moisDuFichier('September orders.csv', ['2025-09-30', '2025-09-12'], now), { periode: '2025-09', deduit: false });
+  assert.deepEqual(moisDuFichier('achats.csv', ['2026-07-01', '2026-07-09', '2026-06-30'], now), { periode: '2026-07', deduit: true });
+  assert.equal(moisDuFichier('achats.csv', [], now), null);
+});
+
+test('un fichier par mois : le dernier import du mois fait foi, les autres mois ne sont jamais touchés', () => {
+  const ligneA = 'B0TEST0001,exemple.ca,4,"45,99",03/10/2026';
+  const ligneB = 'B0TEST0002,exemple.ca,2,"20,00",05/10/2026';
+  const ligneC = 'B0TEST0003,exemple.ca,1,"9,99",07/10/2026';
+  const sept = 'B0TEST0001,exemple.ca,4,"45,99",03/09/2026';
+  const compte = (mois) => db.prepare("SELECT COUNT(*) n FROM factures WHERE cle_import LIKE ? AND annulee = 0").get(`sheet|${mois}|%`).n;
+
+  importerAchats(db, { texte: sept, nom: 'Mondaix - SEPTEMBER orders.csv' });
+  importerAchats(db, { texte: [ligneA, ligneB].join('\n'), nom: 'Mondaix - OCTOBER orders.csv' });
+  assert.deepEqual([compte('2026-09'), compte('2026-10')], [1, 2]);
+
+  // Octobre complété : une ligne ajoutée, rien en double
+  let r = importerAchats(db, { texte: [ligneA, ligneB, ligneC].join('\n'), nom: 'Mondaix - OCTOBER orders (1).csv' });
+  assert.deepEqual([r.periode, r.creees, r.inchangees, r.retirees], ['2026-10', 1, 2, 0]);
+  assert.deepEqual([compte('2026-09'), compte('2026-10')], [1, 3]);
+
+  // Une ligne retirée du fichier d'octobre : facture annulée (gardée), septembre intact
+  r = importerAchats(db, { texte: [ligneA, ligneC].join('\n'), nom: 'Mondaix - OCTOBER orders (2).csv' });
+  assert.equal(r.retirees, 1);
+  assert.deepEqual([compte('2026-09'), compte('2026-10')], [1, 2]);
+  const retiree = db.prepare("SELECT annulee, motif_annulation m FROM factures WHERE numero_facture LIKE 'Sheet B0TEST0002%'").get();
+  assert.deepEqual([retiree.annulee, retiree.m], [1, 'Retirée du Google Sheet (Mondaix - OCTOBER orders (2).csv)']);
+
+  // La ligne revient : rétablie, pas recréée
+  r = importerAchats(db, { texte: [ligneA, ligneB, ligneC].join('\n'), nom: 'Mondaix - OCTOBER orders (3).csv' });
+  assert.equal(r.creees, 0);
+  assert.equal(compte('2026-10'), 3);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM factures WHERE cle_import LIKE 'sheet|%'").get().n, 4);
+
+  // Même contenu sous un autre mois : achats distincts ; fichier identique refusé seulement pour son mois
+  r = importerAchats(db, { texte: [ligneA, ligneB, ligneC].join('\n'), nom: 'NOVEMBER orders.csv' });
+  assert.deepEqual([r.periode, r.creees], ['2026-11', 3]);
+  assert.throws(() => importerAchats(db, { texte: [ligneA, ligneB, ligneC].join('\n'), nom: 'NOVEMBER orders.csv' }), /identique au dernier import de novembre 2026/);
+
+  const mois = resumeImports(db).achats.mois.map((m) => [m.periode, m.nom, m.factures]);
+  assert.deepEqual(mois, [['2026-11', 'NOVEMBER orders.csv', 3], ['2026-10', 'Mondaix - OCTOBER orders (3).csv', 3], ['2026-09', 'Mondaix - SEPTEMBER orders.csv', 1]]);
+});
