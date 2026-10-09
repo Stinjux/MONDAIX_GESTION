@@ -297,6 +297,7 @@ const PARAMETRES_DEFAUT = {
   'couts.inclure_taxes': '0',
   'rapprochement.tolerance': '0.02',
   'amazon.domaine': 'www.amazon.ca',
+  'achats.taux_taxes': '14.975', // TPS + TVQ : total TTC du Google Sheet d'achats → HT
 };
 
 export function ouvrirBase(chemin = cheminBase()) {
@@ -319,6 +320,10 @@ const COLONNES_AJOUTEES = [
   ['factures', 'motif_annulation', 'TEXT'],
   ['envois', 'date_reception', 'TEXT'],
   ['envoi_lignes', 'quantite_recue', 'INTEGER'],
+  ['factures', 'en_attente', 'INTEGER NOT NULL DEFAULT 0'], // commandée, pas encore reçue du fournisseur
+  ['factures', 'cle_import', 'TEXT'], // ligne du Google Sheet d'achats qui l'a créée
+  ['imports', 'empreinte', 'TEXT'], // SHA-256 du fichier : un même fichier n'est importé qu'une fois
+  ['imports_ventes', 'empreinte', 'TEXT'],
 ];
 
 function ajouterColonnesManquantes(db) {

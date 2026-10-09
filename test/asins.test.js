@@ -12,7 +12,12 @@ import { creerFacture as creerFactureSeule } from '../src/services/factures.js';
 import { listerAsins, ficheAsin } from '../src/services/asins.js';
 import { importerInventaire, etatStock } from '../src/services/inventaire.js';
 
-const inv = (db, texte, nom) => importerInventaire(db, { texte, mapping: { asin: 0, quantite: 1 }, nom });
+/** Vieillit d'un jour les imports d'inventaire du jour (un nouvel import le même jour remplacerait la photo du jour). */
+const vieillir = (db) => db.prepare("UPDATE imports SET created_at = datetime(created_at, '-1 day') WHERE type = 'inventaire' AND date(created_at) >= date('now')").run();
+const inv = (db, texte, nom) => {
+  vieillir(db);
+  return importerInventaire(db, { texte, mapping: { asin: 0, quantite: 1 }, nom });
+};
 
 let db;
 beforeEach(() => {
@@ -92,6 +97,19 @@ test('stock : photo de chaque import d’inventaire et écart avec l’import pr
   // Un import sans colonne de quantité ne change pas le stock
   importerInventaire(db, { texte: 'asin,cost\nB0AAAAAAA1,5\n', mapping: { asin: 0, cost: 1 } });
   assert.equal(etatStock(db).dernier.total, 6);
+});
+
+test('import d’inventaire : même fichier refusé, nouvel import le même jour = remplace la photo du jour', () => {
+  creerFacture(db, { numero_facture: 'F-1', total: 100, lignes: [{ asin: 'B0AAAAAAA1', quantite: 14, prix_unitaire_ht: 5 }] });
+  const im = (t, nom) => importerInventaire(db, { texte: t, mapping: { asin: 0, quantite: 1 }, nom });
+  im('asin,qty\nB0AAAAAAA1,14\n', 'aura-matin.csv');
+  assert.throws(() => im('asin,qty\r\nB0AAAAAAA1,14\r\n', 'copie.csv'), /identique au dernier import/);
+  const r = im('asin,qty\nB0AAAAAAA1,12\n', 'aura-soir.csv');
+  assert.deepEqual(r.remplace, ['aura-matin.csv']);
+  const imports = db.prepare("SELECT nom FROM imports WHERE type = 'inventaire'").all().map((i) => i.nom);
+  assert.deepEqual(imports, ['aura-soir.csv'], 'une seule photo du stock pour la journée');
+  const t = listerAsins(db).find((x) => x.asin === 'B0AAAAAAA1').stock_total;
+  assert.deepEqual([t.amazon, t.a_envoyer, t.total], [12, 2, 14], 'jamais en double : 12 chez Amazon + 2 chez vous');
 });
 
 test('statistiques par période : dépenses = factures, progression vs période précédente', () => {
@@ -270,7 +288,7 @@ test('COGS : ventes estimées par la baisse du stock entre deux imports × coût
 test('import d’inventaire supprimé par erreur : stock, coûts et coût retenu reviennent à l’état précédent', async () => {
   const { listerImportsInventaire, supprimerImportInventaire } = await import('../src/services/inventaire.js');
   const { coutRetenu, historiqueCouts } = await import('../src/services/couts.js');
-  const im = (t, nom) => importerInventaire(db, { texte: t, mapping: { asin: 0, quantite: 1, cost: 2 }, nom });
+  const im = (t, nom) => (vieillir(db), importerInventaire(db, { texte: t, mapping: { asin: 0, quantite: 1, cost: 2 }, nom }));
   const r1 = im('asin,qty,cost\nB0AAAAAAA1,14,10\n', 'initial.csv');
   const r2 = im('asin,qty,cost\nB0AAAAAAA1,40,99\nB0AAAAAAA2,5,3\n', 'erreur.csv');
   let imports = listerImportsInventaire(db);
@@ -321,7 +339,8 @@ test('stock : seule la variation entre deux imports compte (10→10 = 10, 10→8
   assert.deepEqual(resume(), [10, 0, 10, 20], 'stock initial : 10 chez Amazon, 10 encore chez vous');
   assert.equal(t().stock_initial, 10);
 
-  invDate('asin,qty\nB0AAAAAAA1,10\n', 'meme', '2026-09-05');
+  assert.throws(() => invDate('asin,qty\nB0AAAAAAA1,10\n', 'meme', '2026-09-05'), /identique au dernier import/, 'même fichier : refusé');
+  invDate('asin,qty,note\nB0AAAAAAA1,10,autre export\n', 'meme', '2026-09-05');
   assert.deepEqual(resume(), [10, 0, 10, 20], '10 → 10 : 10, pas 20');
 
   invDate('asin,qty\nB0AAAAAAA1,8\n', 'ventes', '2026-09-10');
@@ -362,6 +381,7 @@ test('remise à zéro de l’inventaire : imports supprimés, factures et envois
   creerFacture(db, { numero_facture: 'F-1', total: 200, lignes: [{ asin: 'B0AAAAAAA1', quantite: 20, prix_unitaire_ht: 10 }] });
   creerEnvoi(db, { numero_envoi: 'FBA1', date_envoi: '2026-09-02', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 5 }] });
   importerInventaire(db, { texte: 'asin,qty,cost\nB0AAAAAAA1,40,99\nB0AAAAAAA9,3,7\n', mapping: { asin: 0, quantite: 1, cost: 2 }, nom: 'faux' });
+  vieillir(db);
   importerInventaire(db, { texte: 'asin,qty\nB0AAAAAAA1,40\n', mapping: { asin: 0, quantite: 1 }, nom: 'faux-2' });
   assert.deepEqual(migrerReinitialisationInventaire(db), { imports_supprimes: 2 });
   assert.equal(migrerReinitialisationInventaire(db), null, 'une seule fois');

@@ -94,6 +94,20 @@ Alternative cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.
     (stock précédent + unités expédiées à Amazon entre les deux − stock actuel).
   - Chiffre d’affaires = item-price (hors taxes) ; marge avant frais Amazon = chiffre d’affaires − COGS.
 
+### Imports (page Imports)
+
+Les trois fichiers se déposent au même endroit, ensemble ou séparément ; leur type est reconnu à partir du contenu.
+La page indique la date du dernier import de chacun et signale ceux de plus de 7 jours (mise à jour conseillée chaque lundi).
+
+- **Google Sheet d’achats** (CSV, avec ou sans en-tête : ASIN, site, quantité, total TTC, date, statut facultatif) :
+  chaque ligne devient une facture « Google Sheet ». Réimporter met à jour la facture de la ligne (quantité, total, statut,
+  date ou site corrigés) sans jamais en créer une seconde ; une ligne retirée du Sheet ne supprime aucune facture.
+  HT = total ÷ (1 + taux de taxes, 14,975 % par défaut, réglable dans Paramètres). Aucun coût unitaire n’est déduit du Sheet.
+  Statut : reçu (défaut), en attente du fournisseur (hors stock « à envoyer »), annulé / remboursé (facture annulée).
+- **Inventaire Aura** : un fichier identique au dernier import est refusé ; un nouvel import avec quantités le même jour
+  remplace la photo du jour.
+- **Rapport de commandes Amazon** : un rapport identique est refusé ; les commandes déjà connues sont mises à jour.
+
 ### Stock
 
 - Chaque import du fichier d’inventaire Amazon est une **photo complète** qui remplace la précédente ; seule la

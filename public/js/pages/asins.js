@@ -117,7 +117,7 @@ export async function pageAsins(zone) {
           <td class="num" data-tri="${p.stock.quantite}">${celluleStock(p.stock)}${p.stock_total.incoherent
             ? `<span class="sous" title="Chez Amazon (${p.stock_total.amazon}) dépasse les unités achetées sur vos factures (${p.stock_total.achetees}) : une facture manque probablement.">${badge('> acheté', 'alerte')}</span>` : ''}</td>
           <td class="num">${p.stock_total.en_transit}</td>
-          <td class="num">${p.stock_total.a_envoyer}</td>
+          <td class="num">${p.stock_total.a_envoyer}${p.stock_total.en_attente_fournisseur ? `<span class="aide sous">+ ${p.stock_total.en_attente_fournisseur} commandée(s)</span>` : ''}</td>
           <td class="num">${montant(p.cout_retenu)}${asinsEcart.has(p.asin) ? '<br>' + badge('écart', 'alerte') : ''}</td>
           <td class="num">${p.unites_achetees}</td>
           <td class="num">${celluleDepense(p.depenses_factures)}</td>
@@ -261,7 +261,7 @@ export async function pageAsin(zone, asin) {
       ${tuile(p.stock_total.total, 'Stock total (Amazon + en transit + à envoyer)')}
       ${tuile(`${p.stock.quantite}${p.stock.ecart ? ` <span class="variation">${ecartTexte(p.stock.ecart)}</span>` : ''}`, 'Chez Amazon (dernier import)')}
       ${tuile(p.stock_total.en_transit, 'En transit (envois expédiés depuis le dernier import)')}
-      ${tuile(p.stock_total.a_envoyer, `À envoyer : ${p.unites_achetees} achetée(s) − ${p.stock_total.stock_initial} stock initial − ${p.stock_total.restocks} restock(s) − ${p.stock_total.en_transit} en transit`)}
+      ${tuile(p.stock_total.a_envoyer, `À envoyer : ${p.unites_achetees} achetée(s)${p.stock_total.en_attente_fournisseur ? ` − ${p.stock_total.en_attente_fournisseur} en attente du fournisseur` : ''} − ${p.stock_total.stock_initial} stock initial − ${p.stock_total.restocks} restock(s) − ${p.stock_total.en_transit} en transit`)}
       ${tuile(montant(cc.par_unite.achat), 'Coût d’achat HT retenu / unité')}
       ${tuile(montant(df.cout_moyen_unite), `Coût moyen facturé / unité (${df.unites} u.)`)}
       ${tuile(montant(cc.cout_complet_unitaire), 'Coût complet / unité')}

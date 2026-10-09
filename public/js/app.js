@@ -4,6 +4,7 @@ import { ameliorerTableaux } from './tableaux.js';
 import { installerRecherche } from './recherche.js';
 import { icone } from './icones.js';
 import { pageCogs } from './pages/cogs.js';
+import { pageImports } from './pages/imports.js';
 import { pageTableauDeBord } from './pages/tableau.js';
 import { pageDepenses } from './pages/produits.js';
 import { pageAsins, pageAsin } from './pages/asins.js';
@@ -16,6 +17,7 @@ import { pageFournisseurs, pageFactures, pageParametres, pageJournal } from './p
 const ROUTES = [
   [/^$/, pageTableauDeBord],
   [/^cogs$/, pageCogs],
+  [/^imports$/, pageImports],
   [/^factures$/, pageFactures],
   [/^factures\/document\/(\d+)$/, pageDocument],
   [/^asins$/, pageAsins],

@@ -12,6 +12,8 @@ import { bilanStock, etatStock, historiqueStockAsin } from './inventaire.js';
 const SQL_QUANTITES = `
   (SELECT COALESCE(SUM(fl.quantite), 0) FROM facture_lignes fl JOIN factures f ON f.id = fl.facture_id
      WHERE fl.asin = p.asin AND f.annulee = 0) AS unites_achetees,
+  (SELECT COALESCE(SUM(fl.quantite), 0) FROM facture_lignes fl JOIN factures f ON f.id = fl.facture_id
+     WHERE fl.asin = p.asin AND f.annulee = 0 AND f.en_attente = 1) AS unites_en_attente,
   (SELECT COALESCE(SUM(el.quantite), 0) FROM envoi_lignes el JOIN envois e ON e.id = el.envoi_id
      WHERE el.asin = p.asin AND e.statut <> 'en_preparation') AS unites_envoyees,
   (SELECT COALESCE(SUM(el.quantite_recue), 0) FROM envoi_lignes el WHERE el.asin = p.asin) AS unites_recues_amazon,
@@ -33,7 +35,8 @@ const BILAN_VIDE = { initial: 0, envois_apres_initial: 0, restock_non_saisi: 0, 
  *   en transit  = envois expédiés depuis le dernier import ;
  *   sorties de chez vous = stock initial (1er import) + envois enregistrés après lui
  *                          + restocks non saisis (hausses sans envoi) + en transit ;
- *   à envoyer   = unités achetées (factures non annulées) − sorties (jamais négatif) ;
+ *   à envoyer   = unités achetées reçues du fournisseur − sorties (jamais négatif) ;
+ *   commandées  = unités des factures en attente du fournisseur (pas encore chez vous, hors total) ;
  *   total       = chez Amazon + en transit + à envoyer.
  * Chez Amazon au-delà des achats : une facture manque probablement (signalé).
  */
@@ -41,13 +44,15 @@ export function stockTotal(p, stockAmazon, b = BILAN_VIDE) {
   const amazon = stockAmazon.quantite;
   const achetees = p.unites_achetees;
   const sorties = b.initial + b.envois_apres_initial + b.restock_non_saisi + b.en_transit;
-  const aEnvoyer = Math.max(0, achetees - sorties);
+  const enAttente = p.unites_en_attente || 0;
+  const aEnvoyer = Math.max(0, achetees - enAttente - sorties);
   return {
     amazon,
     en_transit: b.en_transit,
     a_envoyer: aEnvoyer,
     total: amazon + b.en_transit + aEnvoyer,
     achetees,
+    en_attente_fournisseur: enAttente,
     stock_initial: b.initial,
     vendues: b.vendues,
     restocks: b.envois_apres_initial + b.restock_non_saisi,

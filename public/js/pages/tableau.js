@@ -113,7 +113,8 @@ function rendreIndicateurs(s) {
 
 export async function pageTableauDeBord(zone) {
   const periode = lirePeriode();
-  const [t, s, refs] = await Promise.all([api('/api/tableau-de-bord'), api(`/api/statistiques?periode=${periode}`), references()]);
+  const [t, s, refs, imp] = await Promise.all([api('/api/tableau-de-bord'), api(`/api/statistiques?periode=${periode}`), references(), api('/api/imports/resume')]);
+  const importsEnRetard = ['achats', 'inventaire', 'ventes'].filter((k) => imp[k].en_retard).length;
   const c = t.compteurs;
   zone.innerHTML = `
     ${entetePage({ titre: 'Tableau de bord', sousTitre: 'Achats, envois, ventes et stock, comparés à la période précédente.', actions: selecteurPeriode(periode) })}
@@ -122,6 +123,7 @@ export async function pageTableauDeBord(zone) {
     <h2>À vérifier</h2>
     <p class="aide">Facture → ASIN (coût unitaire) → envoi Amazon → réception par Amazon → stock Amazon (import d’inventaire).</p>
     <div class="grille grille-4">
+      ${tuileAVerifier(importsEnRetard, 'Imports à mettre à jour (Google Sheet, Aura, commandes Amazon)', '#/imports', 'upload')}
       ${tuileAVerifier(c.envois_a_verifier, `Envois en transit : réception à vérifier (${c.unites_en_transit} unité(s))`, '#/envois?filtre=a_verifier', 'truck')}
       ${tuileAVerifier(c.envois_en_ecart, 'Envois reçus avec un écart', '#/envois?filtre=ecart', 'triangle-alert')}
       ${tuileAVerifier(c.factures_sans_asin, 'Factures sans ASIN associé', '#/factures', 'receipt')}

@@ -9,6 +9,7 @@
 import { ErreurMetier, assurerProduit, journaliser, transaction } from '../db.js';
 import { lireTableau } from '../lib/csv.js';
 import { normaliserAsin, parserMontant, parserQuantite } from '../lib/parse.js';
+import { empreinteTexte } from './inventaire.js';
 
 const COLONNES = {
   commande: ['amazon-order-id', 'order-id', 'order id'],
@@ -58,8 +59,13 @@ export function importerVentes(db, { texte, nom }) {
   if (!entetes.length) throw new ErreurMetier('Fichier vide.');
   const map = colonnes(entetes);
   const val = (l, champ) => (map[champ] === undefined ? '' : l[map[champ]]);
+  const empreinte = empreinteTexte(texte);
+  const deja = db.prepare('SELECT nom, created_at FROM imports_ventes WHERE empreinte = ?').get(empreinte);
+  if (deja) throw new ErreurMetier(`Ce rapport a déjà été importé le ${deja.created_at.slice(0, 10)} (${deja.nom}) : rien n’a été ajouté.`, 409);
   return transaction(db, () => {
-    const imp = db.prepare('INSERT INTO imports_ventes (nom, nb_lignes) VALUES (?, ?)').run(nom || 'Rapport de commandes Amazon', lignes.length);
+    const imp = db
+      .prepare('INSERT INTO imports_ventes (nom, nb_lignes, empreinte) VALUES (?, ?, ?)')
+      .run(nom || 'Rapport de commandes Amazon', lignes.length, empreinte);
     const importId = Number(imp.lastInsertRowid);
     const existe = db.prepare('SELECT id FROM ventes WHERE cle = ?');
     const ecrire = db.prepare(

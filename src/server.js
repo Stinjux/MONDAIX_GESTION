@@ -19,6 +19,8 @@ import * as asins from './services/asins.js';
 import * as stats from './services/statistiques.js';
 import * as documents from './services/documentsFactures.js';
 import * as ventes from './services/ventes.js';
+import * as achats from './services/achats.js';
+import * as imports from './services/imports.js';
 
 const DOSSIER_PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -50,6 +52,10 @@ export function creerRoutes(db) {
   r('POST', '/api/imports/ventes', ({ corps }) => ventes.importerVentes(db, corps));
   r('GET', '/api/imports/ventes', () => ventes.listerImportsVentes(db));
   r('DELETE', '/api/imports/ventes/:id', ({ p }) => ventes.supprimerImportVentes(db, +p.id));
+  r('POST', '/api/imports/achats', ({ corps }) => achats.importerAchats(db, corps));
+  r('GET', '/api/imports/resume', () => imports.resumeImports(db));
+  r('POST', '/api/imports/detecter', ({ corps }) => ({ type: imports.detecterType(corps.texte) }));
+  r('POST', '/api/factures/:id/recue', ({ p, corps }) => achats.marquerRecue(db, +p.id, corps.recue !== false));
   r('GET', '/api/produits', () => asins.listerAsins(db));
   r('GET', '/api/produits/:asin', ({ p }) => asins.ficheAsin(db, p.asin));
   r('PUT', '/api/produits/:asin', ({ p, corps }) => {
@@ -157,10 +163,16 @@ export function creerRoutes(db) {
     tolerance: Number(lireParametre(db, 'rapprochement.tolerance')),
     webhook_configure: Boolean(lireParametre(db, 'email.webhook_token')),
     amazon_domaine: lireParametre(db, 'amazon.domaine'),
+    taux_taxes: Number(lireParametre(db, 'achats.taux_taxes') ?? 14.975),
   }));
   r('PUT', '/api/parametres', ({ corps }) => {
     if (corps.inclure_taxes !== undefined) ecrireParametre(db, 'couts.inclure_taxes', corps.inclure_taxes ? '1' : '0');
     if (corps.tolerance !== undefined) ecrireParametre(db, 'rapprochement.tolerance', String(Math.max(0, Number(corps.tolerance) || 0)));
+    if (corps.taux_taxes !== undefined) {
+      const t = Number(String(corps.taux_taxes).replace(',', '.'));
+      if (!(t >= 0 && t < 100)) throw new ErreurMetier('Taux de taxes invalide (ex. 14,975).');
+      ecrireParametre(db, 'achats.taux_taxes', String(t));
+    }
     if (corps.webhook_token !== undefined) ecrireParametre(db, 'email.webhook_token', String(corps.webhook_token || ''));
     if (corps.amazon_domaine !== undefined) {
       const d = String(corps.amazon_domaine).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');

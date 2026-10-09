@@ -78,6 +78,7 @@ export function parserDate(valeur) {
   if (m) return formaterDate(+m[1], +m[2], +m[3]);
   m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
   if (m) return formaterDate(+m[3], +m[2], +m[1]);
+  if (/^[\d\s.,-]*$/.test(s)) return null; // « 0 », « 2026 » : un nombre seul n'est pas une date
   const d = new Date(s);
   if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   return null;

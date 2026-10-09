@@ -360,6 +360,14 @@ th .formule::after { left: auto; right: 0; transform: none; }
 .tuile.ok .tuile-tete .icone { color: var(--gris-400); }
 .tuile.alerte .tuile-tete .icone { color: var(--accent); }
 .grille-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grille-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .grille-3 { grid-template-columns: minmax(0, 1fr); } }
+.carte-import { display: flex; flex-direction: column; gap: var(--e2); }
+.carte-import p { margin: 0; }
+.carte-import .depot { padding: var(--e4); }
+.carte-import-date { display: flex; flex-wrap: wrap; align-items: center; gap: var(--e2); }
+.pile-resultats details { margin-top: var(--e2); }
+.pile-resultats ul { margin: var(--e2) 0 0; padding-left: var(--e4); }
 @media (max-width: 1100px) { .grille-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .aide.sous, .sous { display: block; margin: 0; }

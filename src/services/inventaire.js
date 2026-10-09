@@ -1,5 +1,6 @@
 // Import du fichier d'inventaire. La colonne « cost » = prix d'achat unitaire HT
 // (sans livraison, préparation ni transport vers Amazon).
+import { createHash } from 'node:crypto';
 import { ErreurMetier, assurerProduit, journaliser, lireParametre, transaction } from '../db.js';
 import { lireTableau } from '../lib/csv.js';
 import { CHAMPS_INVENTAIRE, proposerMapping, validerMapping } from '../lib/mapping.js';
@@ -18,6 +19,16 @@ export function analyserInventaire(texte) {
   };
 }
 
+/** Empreinte d'un fichier importé (fins de ligne et espaces de fin ignorés). */
+export function empreinteTexte(texte) {
+  return createHash('sha256').update(String(texte).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim()).digest('hex');
+}
+
+/**
+ * Import du fichier d'inventaire (Aura ou Amazon), jamais compté deux fois :
+ * - un fichier identique au dernier import est refusé (rien n'a changé) ;
+ * - un nouvel import avec quantités le même jour remplace la photo du jour (une seule par jour).
+ */
 export function importerInventaire(db, { texte, mapping, nom }) {
   const { entetes, lignes } = lireTableau(texte);
   let map;
@@ -26,12 +37,32 @@ export function importerInventaire(db, { texte, mapping, nom }) {
   } catch (e) {
     throw new ErreurMetier(e.message);
   }
+  const empreinte = empreinteTexte(texte);
+  const dernier = db.prepare("SELECT nom, created_at, empreinte FROM imports WHERE type = 'inventaire' ORDER BY id DESC LIMIT 1").get();
+  if (dernier?.empreinte === empreinte) {
+    throw new ErreurMetier(`Fichier identique au dernier import d’inventaire (${dernier.nom}, ${dernier.created_at.slice(0, 10)}) : stock inchangé, rien n’a été ajouté.`, 409);
+  }
   return transaction(db, () => {
+    // Une photo du stock par jour : un fichier avec quantités remplace la photo du jour (les imports
+    // de coûts seuls ne sont jamais remplacés).
+    const memeJour =
+      map.quantite === undefined
+        ? []
+        : db
+            .prepare(
+              `SELECT id, nom FROM imports i WHERE type = 'inventaire' AND date(created_at) = date('now')
+                 AND EXISTS (SELECT 1 FROM stock_releves s WHERE s.import_id = i.id)`,
+            )
+            .all();
+    for (const i of memeJour) supprimerImportInventaire(db, i.id, { motif: 'remplacement' });
     const imp = db
-      .prepare("INSERT INTO imports (type, nom, mapping, entetes, nb_lignes) VALUES ('inventaire', ?, ?, ?, ?)")
-      .run(nom || 'inventaire', JSON.stringify(map), JSON.stringify(entetes), lignes.length);
+      .prepare("INSERT INTO imports (type, nom, mapping, entetes, nb_lignes, empreinte) VALUES ('inventaire', ?, ?, ?, ?, ?)")
+      .run(nom || 'inventaire', JSON.stringify(map), JSON.stringify(entetes), lignes.length, empreinte);
     const importId = Number(imp.lastInsertRowid);
-    const resultat = { import_id: importId, produits: 0, couts_ajoutes: 0, ecarts: [], rejets: [], doublons: [], hors_fba: [] };
+    const resultat = {
+      import_id: importId, produits: 0, couts_ajoutes: 0, ecarts: [], rejets: [], doublons: [], hors_fba: [],
+      remplace: memeJour.map((i) => i.nom),
+    };
     // ASIN → quantité. Plusieurs SKU d'un même ASIN sont additionnés ; une ligne répétée pour le
     // même SKU remplace la précédente (jamais comptée deux fois).
     const parSku = new Map(); // « ASIN | SKU » → quantité

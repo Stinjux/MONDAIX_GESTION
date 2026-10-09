@@ -6,6 +6,7 @@ const PAGES = [
   ['Tableau de bord', '#/', 'layout-dashboard'],
   ['Stocks (ASIN)', '#/asins', 'package'],
   ['COGS', '#/cogs', 'calculator'],
+  ['Imports (Google Sheet, Aura, commandes Amazon)', '#/imports', 'upload'],
   ['Factures', '#/factures', 'receipt'],
   ['Fournisseurs', '#/fournisseurs', 'users'],
   ['Dépenses', '#/depenses', 'wallet'],

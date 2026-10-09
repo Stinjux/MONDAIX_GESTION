@@ -39,6 +39,7 @@ export async function pageFactures(zone) {
     '': ['Toutes', () => true],
     actives: ['Actives', (f) => !f.annulee],
     sans_asin: ['Sans ASIN', (f) => !f.annulee && !f.lignes.length],
+    en_attente: ['En attente du fournisseur', (f) => !f.annulee && f.en_attente],
     annulees: ['Annulées', (f) => f.annulee],
   };
   const q = etatFactures.recherche.toLowerCase();
@@ -63,6 +64,8 @@ export async function pageFactures(zone) {
       ['N°', 'Date', 'Fournisseur', { t: 'Articles (ASIN)', tri: false }, { t: 'Sous-total HT', classe: 'num' }, { t: 'Total', classe: 'num' }, { t: '', tri: false }],
       visibles.map(
         (f) => `<tr data-id="${f.id}" class="${f.annulee ? 'facture-annulee' : ''}"><td><strong>${esc(f.numero_facture || '—')}</strong>
+            ${f.cle_import ? `<span class="sous">${badge('Google Sheet', 'info')}</span>` : ''}
+            ${!f.annulee && f.en_attente ? `<span class="sous">${badge('en attente du fournisseur', 'alerte')}</span>` : ''}
             ${f.annulee ? `<span class="sous">${badge('annulée · remboursée', 'erreur')}</span><span class="aide sous">le ${date(f.date_annulation)}${f.motif_annulation ? ' · ' + esc(f.motif_annulation) : ''}</span>` : ''}</td>
           <td>${date(f.date_facture)}</td><td>${esc(f.fournisseur || '—')}</td>
           <td>${f.lignes.map((l) => `<span class="sous">${asinLien(l.asin)} × ${l.quantite}${l.prix_unitaire_ht !== null ? ` @ ${montant(l.prix_unitaire_ht)}` : ''}</span>`).join('') || badge('aucun ASIN', f.annulee ? '' : 'alerte')}</td>
@@ -107,6 +110,13 @@ export async function pageFactures(zone) {
     menuActions(b, [
       ...(f.document_id ? [{ libelle: 'Voir le document', action: () => window.open(`/api/factures/documents/${f.document_id}/fichier`, '_blank', 'noopener') }] : []),
       ...(f.annulee ? [] : [{ libelle: f.lignes.length ? 'Modifier les ASIN' : 'Associer des ASIN', action: () => modifierAsinsFacture(f) }]),
+      ...(f.annulee
+        ? []
+        : [
+            f.en_attente
+              ? { libelle: 'Marquer reçue du fournisseur', action: async () => (await tenter(() => post(`/api/factures/${f.id}/recue`, { recue: true }), 'Facture marquée reçue.')) !== undefined && rafraichir() }
+              : { libelle: 'Remettre en attente du fournisseur', action: async () => (await tenter(() => post(`/api/factures/${f.id}/recue`, { recue: false }), 'Facture en attente du fournisseur.')) !== undefined && rafraichir() },
+          ]),
       f.annulee
         ? { libelle: 'Rétablir la facture', action: async () => (await tenter(() => post(`/api/factures/${f.id}/retablir`), 'Facture rétablie.')) !== undefined && rafraichir() }
         : { libelle: 'Annuler (remboursée)…', action: () => annulerFactures([f]) },
@@ -207,6 +217,7 @@ export async function pageParametres(zone) {
     <div class="carte">
       <label><input type="checkbox" id="inclure-taxes" ${params.inclure_taxes ? 'checked' : ''}> Inclure les taxes payées dans le coût complet (désactivé si vous les récupérez)</label>
       <div class="actions filtres pile">${champ('tolerance', 'Tolérance de rapprochement des montants ($)', { valeur: params.tolerance })}
+        ${champ('taux_taxes', 'Taxes incluses dans les totaux du Google Sheet (%)', { valeur: String(params.taux_taxes).replace('.', ',') })}
         <button type="button" class="principal" id="enregistrer-calculs">Enregistrer</button></div>
     </div>
     <h2>Amazon</h2>
@@ -226,7 +237,11 @@ export async function pageParametres(zone) {
     }
   };
   zone.querySelector('#enregistrer-calculs').onclick = async () => {
-    await tenter(() => put('/api/parametres', { inclure_taxes: zone.querySelector('#inclure-taxes').checked, tolerance: zone.querySelector('#f-tolerance').value }), 'Paramètres enregistrés.');
+    await tenter(() => put('/api/parametres', {
+      inclure_taxes: zone.querySelector('#inclure-taxes').checked,
+      tolerance: zone.querySelector('#f-tolerance').value,
+      taux_taxes: zone.querySelector('#f-taux_taxes').value,
+    }), 'Paramètres enregistrés.');
   };
 }
 

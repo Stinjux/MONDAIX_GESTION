@@ -29,8 +29,8 @@ test('cost d’inventaire : coût d’achat HT conservé, écarts signalés sans
   assert.equal(coutRetenu(db, 'B0AAAAAAA1').montant_unitaire_ht, 10.5);
   assert.equal(ecartsCouts(db).length, 0);
   assert.equal(historiqueCouts(db, 'B0AAAAAAA1').length, 2, 'historique conservé');
-  // réimport du même inventaire : pas de doublon d'historique
-  importerInventaire(db, { texte: inv, mapping: { asin: 0, cost: 1 }, nom: 'inv1' });
+  // réimport du même fichier : refusé, pas de doublon d'historique
+  assert.throws(() => importerInventaire(db, { texte: inv, mapping: { asin: 0, cost: 1 }, nom: 'inv1' }), /identique au dernier import/);
   assert.equal(historiqueCouts(db, 'B0AAAAAAA1').length, 2);
 });
 
