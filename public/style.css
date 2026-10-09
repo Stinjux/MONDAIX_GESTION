@@ -173,3 +173,8 @@ pre.corps { white-space: pre-wrap; background: var(--neutre-doux); padding: 10px
   .envoi-composition { grid-template-columns: 1fr; }
   .palette-asins { position: static; max-height: 360px; }
 }
+
+/* Facture annulée (remboursée) : conservée, montants barrés */
+.facture-annulee td { color: var(--doux); }
+.facture-annulee .montant-facture { text-decoration: line-through; }
+.reception-amazon { margin-top: 10px; align-items: flex-end; }

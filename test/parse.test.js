@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parserMontant, normaliserAsin, extraireDomaine, nomDepuisDomaine, parserDate } from '../src/lib/parse.js';
 import { lireTableau } from '../src/lib/csv.js';
-import { proposerMapping, CHAMPS_SHEETS, CHAMPS_INVENTAIRE } from '../src/lib/mapping.js';
+import { proposerMapping, CHAMPS_INVENTAIRE } from '../src/lib/mapping.js';
 import { parserEml, extraireNumerosCommande, extraireMontantTotal, extraireNumerosCas, detecterStatutAutorisation, domaineExpediteur } from '../src/lib/email.js';
 
 test('montants : formats français et anglais', () => {
@@ -36,20 +36,17 @@ test('dates', () => {
   assert.equal(parserDate('2026-3-5'), '2026-03-05');
 });
 
-test('CSV / TSV et mapping flexible des colonnes du Google Sheets', () => {
-  const texte = 'ASIN\tSite sur lequel j’ai commandé\tQuantité achetée\tPrix total de la commande\nB0ABC12345\twalmart.ca\t3\t"89,97 $"\n';
+test('CSV / TSV : montants avec virgule et symbole conservés', () => {
+  const texte = 'ASIN\tTitre\tQuantité\tcost\nB0ABC12345\tLampe\t3\t"4,50 $"\n';
   const { entetes, lignes } = lireTableau(texte);
   assert.equal(entetes.length, 4);
-  assert.equal(lignes[0][3], '89,97 $');
-  const m = proposerMapping(entetes, lignes, CHAMPS_SHEETS);
-  assert.deepEqual(m, { asin: 0, site: 1, quantite: 2, total: 3 });
+  assert.equal(lignes[0][3], '4,50 $');
 });
 
 test('mapping par contenu quand les en-têtes sont inhabituels', () => {
-  const { entetes, lignes } = lireTableau('Produit,Où,Combien,Payé\nB0ABC12345,https://www.bestbuy.ca/fr-ca/produit/1,2,50\nB0ABC12346,walmart.ca,1,20\n');
-  const m = proposerMapping(entetes, lignes, CHAMPS_SHEETS);
-  assert.equal(m.asin, 0);
-  assert.equal(m.site, 1);
+  const { entetes, lignes } = lireTableau('Produit,Divers\nB0ABC12345,x\nB0ABC12346,y\n');
+  const m = proposerMapping(entetes, lignes, CHAMPS_INVENTAIRE);
+  assert.equal(m.asin, 0, 'colonne ASIN reconnue à son contenu');
 });
 
 test('mapping inventaire : colonne cost', () => {

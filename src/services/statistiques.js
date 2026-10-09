@@ -1,6 +1,6 @@
 // Indicateurs du tableau de bord par période glissante, comparés à la période précédente.
-import { arrondir, normaliserReference } from '../lib/parse.js';
-import { totalFacture } from './commandes.js';
+import { arrondir } from '../lib/parse.js';
+import { totalFacture } from './factures.js';
 import { etatStock, ventesEstimees } from './inventaire.js';
 
 export const PERIODES = {
@@ -18,20 +18,6 @@ function decaler(date, jours) {
   return new Date(date.getTime() - jours * 86_400_000);
 }
 
-/**
- * Montant d'une commande, sans double comptage : le prix total venant du Google Sheets
- * (total déclaré) fait foi ; à défaut, le total des factures, sinon la somme des lignes
- * dont le coût unitaire est connu.
- */
-export function montantCommande(commande, factures, lignes) {
-  if (commande.total_declare !== null && commande.total_declare !== undefined) return { montant: commande.total_declare, base: 'total_declare' };
-  const totaux = factures.map(totalFacture).filter((t) => t !== null);
-  if (totaux.length) return { montant: arrondir(totaux.reduce((s, t) => s + t, 0)), base: 'facture' };
-  const connues = lignes.filter((l) => l.cout_unitaire_ht !== null);
-  if (connues.length) return { montant: arrondir(connues.reduce((s, l) => s + l.cout_unitaire_ht * l.quantite, 0)), base: 'lignes' };
-  return { montant: 0, base: 'inconnu' };
-}
-
 function variation(courant, precedent) {
   const ecart = arrondir(courant - precedent);
   return { courant, precedent, ecart, pourcentage: precedent ? arrondir((ecart / precedent) * 100) : null };
@@ -45,41 +31,23 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
   const debutPrecedent = jourIso(decaler(maintenant, def.jours * 2)); // exclu
   const dans = (d, de, a) => d > de && d <= a;
 
-  // Commandes
-  const commandes = db.prepare('SELECT * FROM commandes').all();
-  const facturesPar = db.prepare('SELECT * FROM factures WHERE commande_id = ?');
-  const lignesPar = db.prepare('SELECT * FROM commande_lignes WHERE commande_id = ?');
-  const vide = () => ({ depenses: 0, unites: 0, commandes: 0, estimees: 0, depenses_commandes: 0, depenses_factures: 0, factures: 0 });
+  // Achats = factures enregistrées (les factures annulées / remboursées ne comptent pas).
+  const vide = () => ({ depenses: 0, unites: 0, factures: 0, annulees: 0, montant_annule: 0 });
   const agr = { courant: vide(), precedent: vide() };
-  for (const c of commandes) {
-    const d = c.date_commande || String(c.created_at).slice(0, 10);
-    const cle = dans(d, debut, fin) ? 'courant' : dans(d, debutPrecedent, debut) ? 'precedent' : null;
-    if (!cle) continue;
-    const lignes = lignesPar.all(c.id);
-    const m = montantCommande(c, facturesPar.all(c.id), lignes);
-    agr[cle].depenses += m.montant;
-    agr[cle].depenses_commandes += m.montant;
-    agr[cle].unites += lignes.reduce((s, l) => s + l.quantite, 0);
-    agr[cle].commandes++;
-    if (m.base !== 'total_declare') agr[cle].estimees++;
-  }
-
-  // Factures enregistrées seules (sans commande) : ce sont aussi des achats.
-  // Une facture portant le n° d'une commande existante est déjà comptée avec cette commande.
-  const numerosCommandes = new Set(commandes.map((c) => normaliserReference(c.numero_commande)).filter(Boolean));
-  const facturesSeules = db.prepare('SELECT * FROM factures WHERE commande_id IS NULL').all();
+  const factures = db.prepare('SELECT * FROM factures').all();
   const lignesFacture = db.prepare('SELECT quantite FROM facture_lignes WHERE facture_id = ?');
-  for (const f of facturesSeules) {
-    const ref = normaliserReference(f.numero_commande_ref);
-    if (ref && numerosCommandes.has(ref)) continue;
+  for (const f of factures) {
     const d = f.date_facture || String(f.created_at).slice(0, 10);
     const cle = dans(d, debut, fin) ? 'courant' : dans(d, debutPrecedent, debut) ? 'precedent' : null;
     if (!cle) continue;
     const montant = totalFacture(f) ?? 0;
+    if (f.annulee) {
+      agr[cle].annulees++;
+      agr[cle].montant_annule += montant;
+      continue;
+    }
     agr[cle].depenses += montant;
-    agr[cle].depenses_factures += montant;
     agr[cle].unites += lignesFacture.all(f.id).reduce((s, l) => s + l.quantite, 0);
-    agr[cle].commandes++;
     agr[cle].factures++;
   }
 
@@ -138,13 +106,11 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
     indicateurs: {
       depenses: {
         ...variation(arrondir(agr.courant.depenses), arrondir(agr.precedent.depenses)),
-        commandes_sans_total: agr.courant.estimees,
-        dont_commandes: arrondir(agr.courant.depenses_commandes),
-        dont_factures: arrondir(agr.courant.depenses_factures),
-        nb_factures: agr.courant.factures,
+        factures_annulees: agr.courant.annulees,
+        montant_annule: arrondir(agr.courant.montant_annule),
       },
-      commandes: variation(agr.courant.commandes, agr.precedent.commandes),
-      unites_commandees: variation(agr.courant.unites, agr.precedent.unites),
+      factures: variation(agr.courant.factures, agr.precedent.factures),
+      unites_achetees: variation(agr.courant.unites, agr.precedent.unites),
       envois: variation(env.courant.envois, env.precedent.envois),
       unites_envoyees: variation(env.courant.unites, env.precedent.unites),
       stock,

@@ -45,19 +45,19 @@ export function brancherInventaire(zone) {
 }
 
 export async function pageDepenses(zone) {
-  const [depenses, refs, commandes, envois] = await Promise.all([api('/api/depenses'), references(), api('/api/commandes'), api('/api/envois')]);
+  const [depenses, refs, envois] = await Promise.all([api('/api/depenses'), references(), api('/api/envois')]);
   zone.innerHTML = `
     <div class="entete"><div><h1>Dépenses</h1>
-      <p class="aide">Seules les dépenses enregistrées ici (ou issues d’une facture) entrent dans le coût complet.
-      Une dépense se rattache à une commande, à un envoi Amazon ou directement à un ASIN.</p></div>
+      <p class="aide">Dépenses hors facture (préparation, transport vers Amazon, autres) entrant dans le coût complet.
+      Une dépense se rattache à un envoi Amazon ou directement à un ASIN. Les frais des factures (livraison, taxes, autres) sont déjà comptés avec la facture.</p></div>
       <button class="principal" id="nouvelle">Nouvelle dépense</button></div>
     ${tableau(
       ['Date', 'Type', 'Rattachée à', 'Description', { t: 'Montant', classe: 'num' }, ''],
       depenses.map(
         (d) => `<tr><td>${date(d.date_depense || d.created_at)}</td><td>${esc(refs.types_depense[d.type])}</td>
-          <td>${d.commande_id ? `<a href="#/commandes/${d.commande_id}">commande ${esc(d.numero_commande || '#' + d.commande_id)}</a>` : d.envoi_id ? `<a href="#/envois/${d.envoi_id}">envoi ${esc(d.numero_envoi || '#' + d.envoi_id)}</a>` : d.asin ? `${asinLien(d.asin)} (${d.quantite_concernee} u.)` : '—'}</td>
+          <td>${d.envoi_id ? `<a href="#/envois/${d.envoi_id}">envoi ${esc(d.numero_envoi || '#' + d.envoi_id)}</a>` : d.asin ? `${asinLien(d.asin)} (${d.quantite_concernee} u.)` : '<span class="aide">non rattachée (non comptée)</span>'}</td>
           <td>${esc(d.description || '')}</td><td class="num">${montant(d.montant)}</td>
-          <td>${d.facture_id ? badge('facture') : `<button class="petit danger" data-suppr="${d.id}">Supprimer</button>`}</td></tr>`,
+          <td><button class="petit danger" data-suppr="${d.id}">Supprimer</button></td></tr>`,
       ),
       'Aucune dépense.',
     )}`;
@@ -67,7 +67,6 @@ export async function pageDepenses(zone) {
       titre: 'Nouvelle dépense',
       contenu: `<div class="champs">${selecteur('type', 'Type', Object.entries(refs.types_depense))}${champ('montant', 'Montant')}${champ('date_depense', 'Date', { type: 'date' })}${champ('description', 'Description')}</div>
         <h3>Rattacher à</h3><div class="champs">
-        ${selecteur('commande_id', 'Commande', [['', '—'], ...commandes.map((c) => [c.id, c.numero_commande || '#' + c.id])])}
         ${selecteur('envoi_id', 'Envoi Amazon', [['', '—'], ...envois.map((e) => [e.id, e.numero_envoi || '#' + e.id])])}
         ${champ('asin', 'ou ASIN')}${champ('quantite_concernee', 'Unités concernées (si ASIN)')}</div>`,
       valider: (d) => post('/api/depenses', d),

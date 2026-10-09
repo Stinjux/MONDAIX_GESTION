@@ -1,13 +1,13 @@
 // Factures déposées en PDF ou en image : enregistrement du fichier, extraction des données
-// par Claude, propositions (commande, ASIN par ligne), puis validation en facture.
+// par Claude, propositions d'ASIN par article, puis validation en facture.
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { ErreurMetier, journaliser, lireParametre, transaction } from '../db.js';
 import { cheminBase } from '../env.js';
-import { normaliserAsin, normaliserReference, normaliserTexte } from '../lib/parse.js';
-import { creerFacture } from './commandes.js';
+import { normaliserAsin, normaliserTexte } from '../lib/parse.js';
+import { creerFacture } from './factures.js';
 
 export const TYPES_ACCEPTES = {
   'application/pdf': 'pdf',
@@ -126,34 +126,16 @@ function ressemblance(a, b) {
 }
 
 /**
- * Propositions à valider : commande correspondante et ASIN pour chaque ligne.
- * Rien n'est rattaché sans validation.
+ * Propositions à valider : ASIN pour chaque article (écrit sur la facture, sinon titre ressemblant).
+ * Rien n'est associé sans validation.
  */
 export function propositions(db, extraction) {
-  const resultat = { commande: null, commandes_possibles: [], lignes: [] };
+  const resultat = { lignes: [] };
   if (!extraction) return resultat;
-  const commandes = db.prepare('SELECT c.id, c.numero_commande, c.total_declare, f.nom AS fournisseur FROM commandes c LEFT JOIN fournisseurs f ON f.id = c.fournisseur_id').all();
-  const ref = normaliserReference(extraction.numero_commande);
-  if (ref) resultat.commandes_possibles = commandes.filter((c) => normaliserReference(c.numero_commande) === ref);
-  if (!resultat.commandes_possibles.length && extraction.total !== null && extraction.total !== undefined) {
-    resultat.commandes_possibles = commandes.filter(
-      (c) => c.total_declare !== null && Math.abs(c.total_declare - extraction.total) < 0.02 && (!extraction.fournisseur || !c.fournisseur || ressemblance(extraction.fournisseur, c.fournisseur) > 0),
-    );
-  }
-  if (resultat.commandes_possibles.length === 1) resultat.commande = resultat.commandes_possibles[0];
-
-  const lignesCommande = resultat.commande ? db.prepare('SELECT asin, quantite FROM commande_lignes WHERE commande_id = ?').all(resultat.commande.id) : [];
   const produits = db.prepare('SELECT asin, titre FROM produits WHERE titre IS NOT NULL').all();
   for (const l of extraction.lignes || []) {
-    const ecrit = normaliserAsin(l.asin);
-    let asin = null;
-    let motif = null;
-    if (ecrit) [asin, motif] = [ecrit, 'ASIN écrit sur la facture'];
-    if (!asin && lignesCommande.length === 1) [asin, motif] = [lignesCommande[0].asin, 'seul article de la commande'];
-    if (!asin && lignesCommande.length > 1) {
-      const memeQte = lignesCommande.filter((c) => c.quantite === l.quantite);
-      if (memeQte.length === 1) [asin, motif] = [memeQte[0].asin, 'même quantité que la commande'];
-    }
+    let asin = normaliserAsin(l.asin);
+    let motif = asin ? 'ASIN écrit sur la facture' : null;
     if (!asin) {
       const meilleurs = produits.map((p) => ({ asin: p.asin, score: ressemblance(`${l.description} ${l.reference || ''}`, p.titre) })).filter((p) => p.score >= 0.5).sort((a, b) => b.score - a.score);
       if (meilleurs.length && (meilleurs.length === 1 || meilleurs[0].score > meilleurs[1].score)) [asin, motif] = [meilleurs[0].asin, 'titre ressemblant'];
@@ -241,11 +223,9 @@ export function validerDocument(db, id, saisie) {
   const lignes = (saisie.lignes || []).filter((l) => l.asin && String(l.asin).trim());
   return transaction(db, () => {
     const facture = creerFacture(db, {
-      commande_id: saisie.commande_id || null,
       numero_facture: saisie.numero_facture,
-      // N° de commande lu sur la facture : conservé pour éviter un double comptage, sans rattachement.
+      // Référence lue sur la facture, conservée telle quelle.
       numero_commande_ref: saisie.numero_commande_ref ?? d.extraction?.numero_commande ?? null,
-      rattacher_auto: false,
       date_facture: saisie.date_facture,
       sous_total_ht: saisie.sous_total_ht,
       taxes: saisie.taxes,

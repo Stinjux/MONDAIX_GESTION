@@ -1,15 +1,36 @@
 import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, toast, references, asinLien } from '../outils.js';
 import { rafraichir } from '../app.js';
 
+export const TONS_SUIVI = { en_preparation: '', en_transit: 'info', partiel: 'alerte', recu: 'ok', ecart: 'erreur' };
+
+export function badgeSuivi(suivi, refs) {
+  const ecart = suivi.etat === 'ecart' ? ` (${suivi.ecart > 0 ? '+' : '−'}${Math.abs(suivi.ecart)})` : '';
+  return badge(refs.etats_suivi[suivi.etat] + ecart, TONS_SUIVI[suivi.etat]);
+}
+
 export async function pageEnvois(zone) {
   const [envois, refs] = await Promise.all([api('/api/envois'), references()]);
+  const filtre = new URLSearchParams(location.hash.split('?')[1] || '').get('filtre') || '';
+  const filtres = {
+    '': ['Tous', () => true],
+    a_verifier: ['À vérifier (en transit)', (e) => ['en_transit', 'partiel'].includes(e.suivi.etat)],
+    ecart: ['Écarts', (e) => e.suivi.etat === 'ecart'],
+    recu: ['Bien reçus', (e) => e.suivi.etat === 'recu'],
+    en_preparation: ['En préparation', (e) => e.suivi.etat === 'en_preparation'],
+  };
+  const visibles = envois.filter((filtres[filtre] || filtres[''])[1]);
   zone.innerHTML = `
-    <div class="entete"><div><h1>Envois Amazon</h1><p class="aide">Dernière étape de la chaîne. Ouvrez un envoi pour y glisser-déposer les ASIN, saisir le n° et la date d’expédition, et relier chaque ligne à sa commande fournisseur d’origine.</p></div>
+    <div class="entete"><div><h1>Envois Amazon</h1><p class="aide">Créez l’envoi, glissez-y les ASIN avec les quantités envoyées, saisissez le n° et la date d’expédition.
+      Quand Amazon a reçu l’envoi, saisissez les quantités reçues (ou « Tout est arrivé ») pour vérifier qu’il ne manque rien.</p></div>
       <button class="principal" id="nouveau">Nouvel envoi</button></div>
+    <div class="onglets">${Object.entries(filtres)
+      .map(([f, [t, fn]]) => `<a href="#/envois${f ? '?filtre=' + f : ''}" class="${f === filtre ? 'actif' : ''}">${t} (${envois.filter(fn).length})</a>`).join('')}</div>
     ${tableau(
-      ['N° d’expédition', 'Date d’expédition', 'Statut', { t: 'Unités', classe: 'num' }, 'Lignes sans commande', { t: 'Frais', classe: 'num' }],
-      envois.map((e) => `<tr><td><a href="#/envois/${e.id}">${esc(e.numero_envoi || '#' + e.id)}</a></td><td>${date(e.date_envoi)}</td><td>${esc(refs.statuts_envoi[e.statut])}</td>
-        <td class="num">${e.unites}</td><td>${e.lignes_sans_commande ? badge(e.lignes_sans_commande, 'alerte') : badge('0', 'ok')}</td><td class="num">${montant(e.frais)}</td></tr>`),
+      ['N° d’expédition', 'Date d’expédition', 'Statut', { t: 'Envoyé', classe: 'num' }, { t: 'Reçu par Amazon', classe: 'num' }, 'Suivi', { t: 'Frais', classe: 'num' }],
+      visibles.map((e) => `<tr><td><a href="#/envois/${e.id}">${esc(e.numero_envoi || '#' + e.id)}</a></td><td>${date(e.date_envoi)}</td><td>${esc(refs.statuts_envoi[e.statut])}</td>
+        <td class="num">${e.suivi.unites_envoyees}</td>
+        <td class="num">${e.suivi.lignes_a_verifier === e.nb_lignes ? '—' : e.suivi.unites_recues}${e.date_reception ? `<div class="aide" style="margin:0">le ${date(e.date_reception)}</div>` : ''}</td>
+        <td>${badgeSuivi(e.suivi, refs)}</td><td class="num">${montant(e.frais)}</td></tr>`),
       'Aucun envoi.',
     )}`;
   zone.querySelector('#nouveau').onclick = async () => {
@@ -58,7 +79,8 @@ export async function pageEnvoi(zone, id) {
   const unites = e.lignes.reduce((s, l) => s + l.quantite, 0);
   zone.innerHTML = `
     <div class="entete"><div><a href="#/envois">← Envois</a><h1>Envoi ${esc(e.numero_envoi || '#' + e.id)}</h1>
-      <p class="aide">${e.date_envoi ? `Expédié le ${date(e.date_envoi)}` : 'Date d’expédition à saisir'} · ${esc(refs.statuts_envoi[e.statut])} · ${unites} unité(s)</p></div>
+      <p class="aide">${e.date_envoi ? `Expédié le ${date(e.date_envoi)}` : 'Date d’expédition à saisir'} · ${esc(refs.statuts_envoi[e.statut])} · ${unites} unité(s) envoyée(s)</p>
+      <p>${badgeSuivi(e.suivi, refs)}</p></div>
       <div class="actions"><button class="danger" id="supprimer">Supprimer l’envoi</button></div></div>
 
     ${carteExpedition(e, refs)}
@@ -66,20 +88,24 @@ export async function pageEnvoi(zone, id) {
     <div class="envoi-composition">
       <section class="carte zone-depot" id="zone-depot" aria-label="Contenu de l’envoi">
         <h3 style="margin-top:0">Contenu de l’envoi</h3>
-        <p class="aide">Glissez les ASIN de la liste de droite ici (ou cliquez sur « + »). Les quantités se modifient directement dans le tableau.</p>
+        <p class="aide">Glissez les ASIN de la liste de droite ici (ou cliquez sur « + »). Les quantités envoyées se modifient directement dans le tableau.</p>
         ${tableau(
-          ['ASIN', 'Titre', { t: 'Qté', classe: 'num' }, 'Commande d’origine', ''],
+          ['ASIN', 'Titre', { t: 'Envoyé', classe: 'num' }, { t: 'Reçu par Amazon', classe: 'num' }, { t: 'Écart', classe: 'num' }, ''],
           e.lignes.map((l) => {
-            const options = [['', '— non identifiée —'], ...l.commandes_possibles.map((c) => [c.id, `${c.numero_commande || '#' + c.id} · reçues ${c.recues}/${c.commandees} · déjà envoyées ${c.envoyees}`])];
+            const ecart = l.quantite_recue === null ? null : l.quantite_recue - l.quantite;
             return `<tr data-ligne-asin="${esc(l.asin)}"><td>${asinLien(l.asin)}</td><td>${esc(l.titre || '')}</td>
-              <td class="num"><input type="number" min="1" step="1" value="${l.quantite}" data-qte="${l.id}" style="width:80px" aria-label="Quantité ${esc(l.asin)}"></td>
-              <td>${selecteur(`cmd-${l.id}`, '', options, l.commande_id || '', `data-ligne="${l.id}"`)}
-              ${!l.commande_id && l.commandes_possibles.length === 1 ? badge('1 commande possible : à confirmer', 'info') : ''}
-              ${!l.commande_id && l.commandes_possibles.length > 1 ? badge(`${l.commandes_possibles.length} commandes possibles`, 'alerte') : ''}</td>
+              <td class="num"><input type="number" min="1" step="1" value="${l.quantite}" data-qte="${l.id}" style="width:80px" aria-label="Quantité envoyée ${esc(l.asin)}"></td>
+              <td class="num"><input type="number" min="0" step="1" value="${l.quantite_recue ?? ''}" data-recue="${l.id}" placeholder="à saisir" style="width:90px" aria-label="Quantité reçue par Amazon ${esc(l.asin)}"></td>
+              <td class="num">${ecart === null ? '<span class="aide">—</span>' : ecart === 0 ? badge('OK', 'ok') : badge(`${ecart > 0 ? '+' : '−'}${Math.abs(ecart)}`, 'erreur')}</td>
               <td><button class="petit danger" data-suppr="${l.id}">Retirer</button></td></tr>`;
           }),
           'Envoi vide : déposez des ASIN ici.',
         )}
+        ${e.lignes.length ? `<div class="actions reception-amazon">
+          <div><label for="date-reception">Date de réception par Amazon</label><input id="date-reception" type="date" value="${esc(e.date_reception || '')}"></div>
+          <button class="principal" id="enregistrer-reception">Enregistrer les quantités reçues</button>
+          <button id="tout-recu">Tout est arrivé</button></div>
+          <p class="aide">Saisissez les quantités reçues indiquées par Amazon (Seller Central → Envois). Quand toutes les lignes sont saisies, l’envoi passe à « Reçu par Amazon » ; un écart est signalé ici et dans le tableau de bord.</p>` : ''}
         <div class="depot-indice" aria-hidden="true">Déposez l’ASIN ici</div>
       </section>
       <aside class="carte palette-asins" aria-label="ASIN disponibles">
@@ -175,10 +201,18 @@ export async function pageEnvoi(zone, id) {
       if ((await tenter(() => put(`/api/envoi-lignes/${input.dataset.qte}`, { quantite: input.value }), 'Quantité mise à jour.')) !== undefined) rafraichir();
     };
   });
-  zone.querySelectorAll('select[data-ligne]').forEach((s) => {
-    s.onchange = async () => {
-      if ((await tenter(() => put(`/api/envoi-lignes/${s.dataset.ligne}`, { commande_id: s.value || null }), 'Ligne rattachée.')) !== undefined) rafraichir();
-    };
+  const lireReception = () => ({
+    date_reception: zone.querySelector('#date-reception')?.value || undefined,
+    lignes: [...zone.querySelectorAll('[data-recue]')].map((i) => ({ id: Number(i.dataset.recue), quantite_recue: i.value })),
+  });
+  zone.querySelector('#enregistrer-reception')?.addEventListener('click', async () => {
+    const r = await tenter(() => post(`/api/envois/${e.id}/reception`, lireReception()), 'Réception enregistrée.');
+    if (r) rafraichir();
+  });
+  zone.querySelector('#tout-recu')?.addEventListener('click', async () => {
+    if (!confirm('Amazon a reçu toutes les unités envoyées ? Les quantités reçues seront égales aux quantités envoyées.')) return;
+    const r = await tenter(() => post(`/api/envois/${e.id}/tout-recu`, { date_reception: zone.querySelector('#date-reception')?.value || undefined }), 'Envoi reçu en entier par Amazon.');
+    if (r) rafraichir();
   });
   zone.querySelectorAll('[data-suppr]').forEach((b) => (b.onclick = async () => (await tenter(() => suppr(`/api/envoi-lignes/${b.dataset.suppr}`))) !== undefined && rafraichir()));
   zone.querySelectorAll('[data-suppr-dep]').forEach((b) => (b.onclick = async () => (await tenter(() => suppr(`/api/depenses/${b.dataset.supprDep}`))) !== undefined && rafraichir()));

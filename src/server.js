@@ -7,9 +7,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { creerControleAcces, routePublique } from './lib/acces.js';
 import { ErreurMetier, ecrireParametre, lireParametre } from './db.js';
 import * as fournisseurs from './services/fournisseurs.js';
-import * as sheets from './services/importSheets.js';
 import * as inventaire from './services/inventaire.js';
-import * as commandes from './services/commandes.js';
+import * as factures from './services/factures.js';
 import * as couts from './services/couts.js';
 import * as envois from './services/envois.js';
 import * as autorisations from './services/autorisations.js';
@@ -41,21 +40,6 @@ export function creerRoutes(db) {
   r('PUT', '/api/fournisseurs/:id', ({ p, corps }) => fournisseurs.modifierFournisseur(db, +p.id, corps));
   r('POST', '/api/fournisseurs/proposer', ({ corps }) => fournisseurs.proposerFournisseur(db, corps.lien));
 
-  // Import Google Sheets
-  r('POST', '/api/imports/sheets/telecharger', async ({ corps }) => ({ texte: await sheets.telechargerSheets(corps.url) }));
-  r('POST', '/api/imports/sheets/analyser', ({ corps }) => sheets.analyserSheets(corps.texte));
-  r('POST', '/api/imports/sheets', ({ corps }) => sheets.importerSheets(db, corps));
-  r('GET', '/api/imports', () => sheets.listerImports(db));
-  r('GET', '/api/lignes-import', ({ q }) => sheets.listerLignesImport(db, { importId: q.get('import_id'), statut: q.get('statut') }));
-  r('GET', '/api/lignes-import/propositions', () => sheets.propositionsRattachement(db));
-  r('PUT', '/api/lignes-import/:id', ({ p, corps }) => sheets.corrigerLigneImport(db, +p.id, corps));
-  r('POST', '/api/lignes-import/fournisseur', ({ corps }) => ({ fournisseur_id: sheets.validerFournisseurLignes(db, corps) }));
-  r('POST', '/api/lignes-import/grouper', ({ corps }) => sheets.grouperEnCommande(db, corps));
-  r('POST', '/api/lignes-import/rattacher', ({ corps }) => sheets.rattacherLignes(db, corps));
-  r('POST', '/api/lignes-import/lier', ({ corps }) => sheets.lierLigneExistante(db, corps));
-  r('POST', '/api/lignes-import/statut', ({ corps }) => sheets.changerStatutLignes(db, corps));
-  r('POST', '/api/lignes-import/:id/detacher', ({ p }) => sheets.detacherLigne(db, +p.id));
-
   // Inventaire et coûts
   r('POST', '/api/imports/inventaire/analyser', ({ corps }) => inventaire.analyserInventaire(corps.texte));
   r('POST', '/api/imports/inventaire', ({ corps }) => inventaire.importerInventaire(db, corps));
@@ -77,33 +61,15 @@ export function creerRoutes(db) {
   r('POST', '/api/depenses', ({ corps }) => couts.creerDepense(db, corps));
   r('DELETE', '/api/depenses/:id', ({ p }) => couts.supprimerDepense(db, +p.id));
 
-  // Commandes
-  r('GET', '/api/commandes', () => commandes.listerCommandes(db));
-  r('POST', '/api/commandes', ({ corps }) => {
-    const id = commandes.creerCommande(db, corps);
-    emails.relancerRapprochements(db, 'gmail');
-    return { id };
-  });
-  r('GET', '/api/commandes/:id', ({ p }) => commandes.lireCommande(db, +p.id));
-  r('PUT', '/api/commandes/:id', ({ p, corps }) => {
-    commandes.modifierCommande(db, +p.id, corps);
-    emails.relancerRapprochements(db, 'gmail');
-  });
-  r('DELETE', '/api/commandes/:id', ({ p }) => commandes.supprimerCommande(db, +p.id));
-  r('POST', '/api/commandes/:id/lignes', ({ p, corps }) => ({ id: commandes.ajouterLigneCommande(db, +p.id, corps) }));
-  r('PUT', '/api/commande-lignes/:id', ({ p, corps }) => commandes.modifierLigneCommande(db, +p.id, corps));
-  r('DELETE', '/api/commande-lignes/:id', ({ p }) => commandes.supprimerLigneCommande(db, +p.id));
-  r('POST', '/api/commandes/:id/receptions', ({ p, corps }) => ({ id: commandes.creerReception(db, +p.id, corps) }));
-  r('DELETE', '/api/receptions/:id', ({ p }) => commandes.supprimerReception(db, +p.id));
-
   // Factures
-  r('GET', '/api/factures', ({ q }) => commandes.listerFactures(db, { sansCommande: q.get('sans_commande') === '1' }));
-  r('POST', '/api/factures', ({ corps }) => commandes.creerFacture(db, corps));
-  r('PUT', '/api/factures/:id/commande', ({ p, corps }) => commandes.rattacherFacture(db, +p.id, corps.commande_id ? +corps.commande_id : null));
-  r('DELETE', '/api/factures/:id', ({ p }) => commandes.supprimerFacture(db, +p.id));
-  r('PUT', '/api/factures/:id/lignes', ({ p, corps }) => commandes.modifierLignesFacture(db, +p.id, corps.lignes));
-  r('POST', '/api/factures/:id/lignes', ({ p, corps }) => commandes.ajouterLigneFacture(db, +p.id, corps));
-  r('DELETE', '/api/facture-lignes/:id', ({ p }) => commandes.retirerLigneFacture(db, +p.id));
+  r('GET', '/api/factures', () => factures.listerFactures(db));
+  r('POST', '/api/factures', ({ corps }) => factures.creerFacture(db, corps));
+  r('DELETE', '/api/factures/:id', ({ p }) => factures.supprimerFacture(db, +p.id));
+  r('POST', '/api/factures/:id/annuler', ({ p, corps }) => factures.annulerFacture(db, +p.id, corps));
+  r('POST', '/api/factures/:id/retablir', ({ p }) => factures.retablirFacture(db, +p.id));
+  r('PUT', '/api/factures/:id/lignes', ({ p, corps }) => factures.modifierLignesFacture(db, +p.id, corps.lignes));
+  r('POST', '/api/factures/:id/lignes', ({ p, corps }) => factures.ajouterLigneFacture(db, +p.id, corps));
+  r('DELETE', '/api/facture-lignes/:id', ({ p }) => factures.retirerLigneFacture(db, +p.id));
 
   // Factures déposées (PDF / image) et extraction
   r('GET', '/api/factures/documents', ({ q }) => ({
@@ -123,10 +89,11 @@ export function creerRoutes(db) {
   r('GET', '/api/envois/:id', ({ p }) => envois.lireEnvoi(db, +p.id));
   r('PUT', '/api/envois/:id', ({ p, corps }) => envois.modifierEnvoi(db, +p.id, corps));
   r('DELETE', '/api/envois/:id', ({ p }) => envois.supprimerEnvoi(db, +p.id));
+  r('POST', '/api/envois/:id/reception', ({ p, corps }) => envois.enregistrerReception(db, +p.id, corps));
+  r('POST', '/api/envois/:id/tout-recu', ({ p, corps }) => envois.toutRecu(db, +p.id, corps));
   r('POST', '/api/envois/:id/lignes', ({ p, corps }) => envois.ajouterLigneEnvoi(db, +p.id, corps));
   r('PUT', '/api/envoi-lignes/:id', ({ p, corps }) => envois.modifierLigneEnvoi(db, +p.id, corps));
   r('DELETE', '/api/envoi-lignes/:id', ({ p }) => envois.supprimerLigneEnvoi(db, +p.id));
-  r('GET', '/api/asin/:asin/commandes', ({ p }) => envois.commandesPourAsin(db, p.asin));
 
   // Autorisations
   r('GET', '/api/dossiers', () => autorisations.listerDossiers(db));
@@ -147,7 +114,7 @@ export function creerRoutes(db) {
   });
   r('DELETE', '/api/dossiers/:id', ({ p }) => autorisations.supprimerDossier(db, +p.id));
 
-  // Emails (Gmail → commandes, Neo → autorisations)
+  // Emails (Gmail et Neo, associés aux ASIN)
   r('GET', '/api/emails/sources', () => emails.etatSources(db).map((s) => ({ ...s, synchro: synchro.etatSynchro(db, s.source) })));
   r('POST', '/api/emails/synchroniser', async ({ corps }) => {
     if (corps.source) {
@@ -171,13 +138,11 @@ export function creerRoutes(db) {
     return corps.raw ? emails.ingererEml(db, p.source, corps.raw) : emails.ingererEmail(db, p.source, message, 'webhook');
   });
   r('POST', '/api/emails/relancer', ({ corps }) => ({ traites: emails.relancerRapprochements(db, corps.source || null) }));
-  r('POST', '/api/emails/:id/valider', ({ p, corps }) => emails.validerRapprochement(db, +p.id, corps));
   r('POST', '/api/emails/:id/dissocier', ({ p }) => emails.dissocierEmail(db, +p.id));
   r('POST', '/api/emails/:id/ignorer', ({ p }) => emails.ignorerEmail(db, +p.id));
   r('POST', '/api/emails/:id/liens', ({ p, corps }) => emails.lierEmail(db, +p.id, corps));
   r('DELETE', '/api/email-liens/:id', ({ p }) => emails.delierEmail(db, +p.id));
   r('POST', '/api/emails/:id/statut', ({ p, corps }) => emails.appliquerStatutNeo(db, +p.id, corps.statut));
-  r('POST', '/api/emails/:id/creer-commande', ({ p, corps }) => ({ id: emails.creerCommandeDepuisEmail(db, +p.id, corps) }));
 
   // Paramètres
   r('GET', '/api/parametres', () => ({
@@ -203,6 +168,7 @@ export function creerRoutes(db) {
   r('GET', '/api/references', () => ({
     statuts_dossier: autorisations.STATUTS_DOSSIER,
     statuts_envoi: envois.STATUTS_ENVOI,
+    etats_suivi: envois.ETATS_SUIVI,
     types_depense: couts.TYPES_DEPENSE,
     sources_cout: couts.LIBELLES_SOURCE_COUT,
     sources_email: emails.SOURCES_EMAIL,

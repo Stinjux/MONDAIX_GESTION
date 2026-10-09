@@ -1,10 +1,11 @@
 // Coût d'achat unitaire (historisé) et coût complet calculé à partir des dépenses enregistrées.
 import { ErreurMetier, assurerProduit, journaliser, lireParametre } from '../db.js';
 import { arrondir, normaliserAsin, parserMontant, parserQuantite } from '../lib/parse.js';
+import { ratioFactureAsin } from './factures.js';
 
 export const LIBELLES_SOURCE_COUT = {
   inventaire: 'Fichier d’inventaire (cost)',
-  commande: 'Commande fournisseur',
+  commande: 'Import (ancien)',
   facture: 'Facture',
   manuel: 'Saisie manuelle',
 };
@@ -124,7 +125,7 @@ export function creerDepense(db, d) {
   const montant = parserMontant(d.montant);
   if (montant === null) throw new ErreurMetier('Montant invalide.');
   const cibles = [d.commande_id, d.envoi_id, d.asin].filter((x) => x !== null && x !== undefined && x !== '');
-  if (cibles.length > 1) throw new ErreurMetier('Une dépense se rattache à une seule cible : commande, envoi ou ASIN.');
+  if (cibles.length > 1) throw new ErreurMetier('Une dépense se rattache à une seule cible : envoi ou ASIN.');
   let asin = null;
   let quantite = null;
   if (d.asin) {
@@ -163,9 +164,10 @@ export function supprimerDepense(db, id) {
 }
 
 export function listerDepenses(db, filtre = {}) {
-  const conds = [];
+  // Les frais copiés depuis une facture sont déjà comptés avec la facture : non listés.
+  const conds = ['d.facture_id IS NULL'];
   const params = [];
-  for (const cle of ['commande_id', 'envoi_id', 'asin']) {
+  for (const cle of ['envoi_id', 'asin']) {
     if (filtre[cle]) {
       conds.push(`d.${cle} = ?`);
       params.push(filtre[cle]);
@@ -173,8 +175,7 @@ export function listerDepenses(db, filtre = {}) {
   }
   return db
     .prepare(
-      `SELECT d.*, c.numero_commande, e.numero_envoi FROM depenses d
-       LEFT JOIN commandes c ON c.id = d.commande_id
+      `SELECT d.*, e.numero_envoi FROM depenses d
        LEFT JOIN envois e ON e.id = d.envoi_id
        ${conds.length ? 'WHERE ' + conds.join(' AND ') : ''}
        ORDER BY COALESCE(d.date_depense, d.created_at) DESC, d.id DESC`,
@@ -191,7 +192,7 @@ function typesInclus(db) {
 
 /**
  * Coût complet unitaire = coût d'achat retenu
- *   + frais de commande répartis au prorata des quantités de chaque commande
+ *   + frais des factures (livraison, autres, taxes si incluses) au prorata de la part de l'ASIN
  *   + frais d'envoi Amazon répartis au prorata des quantités de chaque envoi
  *   + dépenses rattachées directement à l'ASIN / unités concernées.
  * Seules les dépenses effectivement enregistrées sont utilisées ; le total
@@ -203,28 +204,20 @@ export function coutComplet(db, asin) {
   const retenu = coutRetenu(db, asin);
   const alertes = [];
 
-  // Frais de commande
+  // Frais des factures (livraison, autres frais, taxes si incluses), au prorata de la part de l'ASIN.
+  // Les factures annulées (remboursées) ne comptent pas.
   let fraisAchat = 0;
   let unitesAchat = 0;
-  const commandes = db
-    .prepare(
-      `SELECT cl.commande_id, SUM(cl.quantite) AS quantite, c.numero_commande
-       FROM commande_lignes cl JOIN commandes c ON c.id = cl.commande_id
-       WHERE cl.asin = ? GROUP BY cl.commande_id`,
-    )
+  const lignesFacture = db.prepare('SELECT asin, quantite, prix_unitaire_ht FROM facture_lignes WHERE facture_id = ?');
+  const factures = db
+    .prepare('SELECT DISTINCT f.* FROM factures f JOIN facture_lignes fl ON fl.facture_id = f.id WHERE fl.asin = ? AND f.annulee = 0')
     .all(asin);
-  const commandesSansFrais = [];
-  for (const c of commandes) {
-    const qteTotale = db.prepare('SELECT SUM(quantite) AS q FROM commande_lignes WHERE commande_id = ?').get(c.commande_id).q || 0;
-    const frais = db
-      .prepare(`SELECT COALESCE(SUM(montant), 0) AS s, COUNT(*) AS n FROM depenses WHERE commande_id = ? AND ${filtreTypes}`)
-      .get(c.commande_id, ...types);
-    if (!frais.n) commandesSansFrais.push(c.numero_commande || `#${c.commande_id}`);
-    if (qteTotale > 0) fraisAchat += (frais.s * c.quantite) / qteTotale;
-    unitesAchat += c.quantite;
-  }
-  if (commandesSansFrais.length) {
-    alertes.push(`Aucune dépense enregistrée pour : ${commandesSansFrais.join(', ')} (livraison inconnue ou nulle).`);
+  for (const f of factures) {
+    const lignes = lignesFacture.all(f.id);
+    const r = ratioFactureAsin(f, lignes, asin);
+    const frais = (f.livraison || 0) + (f.autres_frais || 0) + (types.includes('taxes') ? f.taxes || 0 : 0);
+    fraisAchat += frais * r.ratio;
+    unitesAchat += lignes.filter((l) => l.asin === asin).reduce((s, l) => s + l.quantite, 0);
   }
 
   // Frais d'envoi vers Amazon
@@ -250,13 +243,13 @@ export function coutComplet(db, asin) {
 
   const parUnite = {
     achat: retenu ? retenu.montant_unitaire_ht : null,
-    frais_commande: unitesAchat ? arrondir(fraisAchat / unitesAchat) : 0,
+    frais_facture: unitesAchat ? arrondir(fraisAchat / unitesAchat) : 0,
     frais_envoi: unitesEnvoyees ? arrondir(fraisEnvoi / unitesEnvoyees) : 0,
     frais_directs: directes.q ? arrondir(directes.s / directes.q) : 0,
   };
   if (!retenu) alertes.push('Coût d’achat unitaire inconnu.');
   const total = retenu
-    ? arrondir(parUnite.achat + parUnite.frais_commande + parUnite.frais_envoi + parUnite.frais_directs)
+    ? arrondir(parUnite.achat + parUnite.frais_facture + parUnite.frais_envoi + parUnite.frais_directs)
     : null;
   return {
     asin,

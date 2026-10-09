@@ -31,18 +31,23 @@ export async function pageFactures(zone) {
   const [factures, docs] = await Promise.all([api('/api/factures'), api('/api/factures/documents?statut=a_valider')]);
   zone.innerHTML = `
     <div class="entete"><div><h1>Factures</h1>
-      <p class="aide">Chaque article d’une facture est associé à un ASIN ; aucune commande n’est nécessaire.</p></div>
+      <p class="aide">Déposez la facture, associez chaque article à un ASIN avec son coût unitaire HT et la date de la facture.
+        Si le fournisseur annule et vous rembourse, cliquez sur « Annuler » : la facture reste dans l’historique mais ne compte plus dans les dépenses.</p></div>
       <button id="nouvelle">Saisie manuelle</button></div>
     ${carteDepot(docs)}
     <h2>Factures enregistrées</h2>
     ${tableau(
       ['N°', 'Date', 'Fournisseur', 'Articles (ASIN)', { t: 'Sous-total HT', classe: 'num' }, { t: 'Total', classe: 'num' }, ''],
       factures.map(
-        (f) => `<tr><td>${esc(f.numero_facture || '—')}</td><td>${date(f.date_facture)}</td><td>${esc(f.fournisseur || '—')}</td>
-          <td>${f.lignes.map((l) => `${asinLien(l.asin)} × ${l.quantite}${l.prix_unitaire_ht !== null ? ` @ ${montant(l.prix_unitaire_ht)}` : ''}`).join('<br>') || badge('aucun ASIN', 'alerte')}
-            <div><button class="petit" data-asins="${f.id}">${f.lignes.length ? 'Modifier les ASIN' : 'Associer des ASIN'}</button></div></td>
-          <td class="num">${montant(f.sous_total_ht)}</td><td class="num">${montant(f.total_calcule)}</td>
-          <td class="actions">${f.document_id ? `<a class="bouton petit" href="/api/factures/documents/${f.document_id}/fichier" target="_blank" rel="noopener">Document</a>` : ''}<button class="petit danger" data-suppr="${f.id}">Supprimer</button></td></tr>`,
+        (f) => `<tr class="${f.annulee ? 'facture-annulee' : ''}"><td>${esc(f.numero_facture || '—')}
+            ${f.annulee ? `<div>${badge('annulée · remboursée', 'erreur')}</div><div class="aide" style="margin:0">le ${date(f.date_annulation)}${f.motif_annulation ? ' · ' + esc(f.motif_annulation) : ''}</div>` : ''}</td>
+          <td>${date(f.date_facture)}</td><td>${esc(f.fournisseur || '—')}</td>
+          <td>${f.lignes.map((l) => `${asinLien(l.asin)} × ${l.quantite}${l.prix_unitaire_ht !== null ? ` @ ${montant(l.prix_unitaire_ht)}` : ''}`).join('<br>') || badge('aucun ASIN', f.annulee ? '' : 'alerte')}
+            ${f.annulee ? '' : `<div><button class="petit" data-asins="${f.id}">${f.lignes.length ? 'Modifier les ASIN' : 'Associer des ASIN'}</button></div>`}</td>
+          <td class="num montant-facture">${montant(f.sous_total_ht)}</td><td class="num montant-facture">${montant(f.total_calcule)}</td>
+          <td class="actions">${f.document_id ? `<a class="bouton petit" href="/api/factures/documents/${f.document_id}/fichier" target="_blank" rel="noopener">Document</a>` : ''}
+            ${f.annulee ? `<button class="petit" data-retablir="${f.id}">Rétablir</button>` : `<button class="petit" data-annuler="${f.id}">Annuler</button>`}
+            <button class="petit danger" data-suppr="${f.id}">Supprimer</button></td></tr>`,
       ),
       'Aucune facture.',
     )}`;
@@ -58,6 +63,26 @@ export async function pageFactures(zone) {
     if (r) rafraichir();
   };
   zone.querySelectorAll('[data-suppr]').forEach((b) => (b.onclick = async () => (await tenter(() => suppr(`/api/factures/${b.dataset.suppr}`))) !== undefined && rafraichir()));
+  zone.querySelectorAll('[data-annuler]').forEach((b) => {
+    b.onclick = async () => {
+      const f = factures.find((x) => x.id === Number(b.dataset.annuler));
+      const ok = await modale({
+        titre: `Annuler la facture ${f.numero_facture || '#' + f.id} ?`,
+        contenu: `<p>Le fournisseur a annulé et vous a remboursé. La facture <strong>reste dans l’historique</strong> (et sur la fiche des ASIN),
+          mais ne compte plus dans les dépenses, les unités achetées ni le coût complet. Vous pourrez la rétablir.</p>
+          <div class="champs">${champ('date_annulation', 'Date de l’annulation / du remboursement', { type: 'date', valeur: new Date().toISOString().slice(0, 10) })}
+          ${champ('motif', 'Motif (facultatif)', { attrs: 'placeholder="ex. rupture de stock, remboursé le…"' })}</div>`,
+        libelleValider: 'Annuler la facture',
+        valider: (d) => post(`/api/factures/${f.id}/annuler`, d),
+      });
+      if (ok) rafraichir();
+    };
+  });
+  zone.querySelectorAll('[data-retablir]').forEach((b) => {
+    b.onclick = async () => {
+      if ((await tenter(() => post(`/api/factures/${b.dataset.retablir}/retablir`), 'Facture rétablie.')) !== undefined) rafraichir();
+    };
+  });
   zone.querySelectorAll('[data-asins]').forEach((b) => (b.onclick = () => modifierAsinsFacture(factures.find((f) => f.id === Number(b.dataset.asins)))));
 }
 
@@ -158,7 +183,7 @@ function carteSource(s) {
   const b = y.dernier_bilan;
   return `<div class="carte">
     <div class="entete" style="margin-bottom:6px"><div><h3 style="margin:0">${esc(s.libelle)} ${etat}</h3>
-      <p class="aide" style="margin:2px 0 0">${esc(s.role)} → ${s.module === 'commandes' ? '<a href="#/commandes">Commandes fournisseurs</a>' : '<a href="#/autorisations">Dossiers d’autorisation</a>'}</p></div>
+      <p class="aide" style="margin:2px 0 0">${esc(s.role)} → <a href="#/emails/${s.source}">emails associés aux ASIN</a></p></div>
       ${y.configuree ? `<button data-synchro="${s.source}" ${y.en_cours ? 'disabled' : ''}>${y.en_cours ? 'Synchronisation…' : 'Synchroniser maintenant'}</button>` : ''}</div>
     <div class="champs" style="margin-bottom:0">
       <div><label>Compte</label>${esc(y.utilisateur || 'non configuré')}${y.hote ? ` <span class="aide">(${esc(y.hote)})</span>` : ''}</div>

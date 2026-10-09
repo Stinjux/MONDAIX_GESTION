@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { ouvrirBase } from '../src/db.js';
 import { deposerDocument, extraireAvecClaude, extraireDocument, validerDocument, supprimerDocument, lireDocument, propositions, migrerReferencesFactures } from '../src/services/documentsFactures.js';
-import { creerCommande, lireCommande, supprimerFacture, listerFactures } from '../src/services/commandes.js';
+import { supprimerFacture, listerFactures } from '../src/services/factures.js';
 import { coutRetenu } from '../src/services/couts.js';
 
 const dossier = mkdtempSync(join(tmpdir(), 'mondaix-docs-'));
@@ -29,38 +29,37 @@ beforeEach(() => {
   db = ouvrirBase(':memory:');
 });
 
-test('dépôt d’un PDF : fichier conservé, extraction, propositions de commande et d’ASIN', async () => {
-  const c = creerCommande(db, { numero_commande: 'W-2001', total_declare: 96.98, lignes: [{ asin: 'B0AAAAAAA1', quantite: 2 }, { asin: 'B0AAAAAAA2', quantite: 3 }] });
+test('dépôt d’un PDF : fichier conservé, extraction, propositions d’ASIN', async () => {
+  db.prepare("INSERT INTO produits (asin, titre) VALUES ('B0AAAAAAA1', 'Gourde isotherme 750 ml'), ('B0AAAAAAA2', 'Tapis de yoga antidérapant')").run();
   const d = await deposerDocument(db, { nom: 'facture.pdf', type: 'application/pdf', donnees: PDF }, { extraire: extraireFaux });
   assert.ok(existsSync(join(dossier, d.chemin.split('/').pop())));
   assert.equal(d.statut, 'a_valider');
   assert.equal(d.extraction.numero_facture, 'INV-77');
-  assert.equal(d.propositions.commande.id, c);
-  assert.deepEqual(d.propositions.lignes.map((l) => l.asin), ['B0AAAAAAA1', 'B0AAAAAAA2'], 'même quantité que les lignes de la commande');
+  assert.equal(d.propositions.commande, undefined, 'aucune notion de commande');
+  assert.deepEqual(d.propositions.lignes.map((l) => l.asin), ['B0AAAAAAA1', 'B0AAAAAAA2'], 'titres ressemblants');
   const encore = await deposerDocument(db, { nom: 'copie.pdf', type: 'application/pdf', donnees: PDF }, { extraire: extraireFaux });
   assert.equal(encore.doublon, true);
   assert.equal(encore.id, d.id);
 });
 
-test('proposition d’ASIN par ressemblance du titre quand aucune commande ne correspond', () => {
+test('proposition d’ASIN : écrit sur la facture, sinon titre ressemblant, sinon aucune', () => {
   db.prepare("INSERT INTO produits (asin, titre) VALUES ('B0AAAAAAA9', 'Gourde isotherme inox 750 ml')").run();
-  const p = propositions(db, { ...EXTRACTION, numero_commande: null, total: 1 });
-  assert.equal(p.commande, null);
-  assert.deepEqual(p.lignes.map((l) => l.asin), ['B0AAAAAAA9', null]);
+  const p = propositions(db, { ...EXTRACTION, lignes: [...EXTRACTION.lignes, { description: 'Autre', asin: 'b0aaaaaaa3', quantite: 1 }] });
+  assert.deepEqual(p.lignes.map((l) => l.asin), ['B0AAAAAAA9', null, 'B0AAAAAAA3']);
+  assert.deepEqual(p.lignes.map((l) => l.motif), ['titre ressemblant', null, 'ASIN écrit sur la facture']);
 });
 
 test('validation : une ligne → un ASIN, plusieurs lignes → plusieurs ASIN ; coût d’achat historisé', async () => {
-  const c = creerCommande(db, { numero_commande: 'W-2001', lignes: [{ asin: 'B0AAAAAAA1', quantite: 2 }] });
   const d = await deposerDocument(db, { nom: 'f.pdf', type: 'application/pdf', donnees: PDF }, { extraire: extraireFaux });
   const f = validerDocument(db, d.id, {
-    commande_id: c, numero_facture: 'INV-77', date_facture: '2026-10-01', sous_total_ht: 80, taxes: 11.98, livraison: 5, total: 96.98,
+    numero_facture: 'INV-77', date_facture: '2026-10-01', sous_total_ht: 80, taxes: 11.98, livraison: 5, total: 96.98,
     lignes: [
       { asin: 'B0AAAAAAA1', quantite: 2, prix_unitaire_ht: 25 },
       { asin: 'B0AAAAAAA2', quantite: 3, prix_unitaire_ht: 10 },
       { asin: '', quantite: 1, prix_unitaire_ht: 4 },
     ],
   });
-  const facture = lireCommande(db, c).factures[0];
+  const facture = listerFactures(db)[0];
   assert.equal(facture.id, f.id);
   assert.equal(facture.document_id, d.id);
   assert.deepEqual(facture.lignes.map((l) => [l.asin, l.quantite, l.prix_unitaire_ht]), [['B0AAAAAAA1', 2, 25], ['B0AAAAAAA2', 3, 10]], 'ligne sans ASIN ignorée');
@@ -107,20 +106,18 @@ test('appel à l’API Claude : PDF en bloc document, image en bloc image, sorti
   await assert.rejects(extraireAvecClaude({ donnees: Buffer.from('x'), typeMime: 'image/png' }, { client: enPanne }), /Clé ANTHROPIC_API_KEY refusée/);
 });
 
-test('facture déposée enregistrée sans commande : articles associés aux ASIN, aucune commande requise', async () => {
-  creerCommande(db, { numero_commande: 'W-2001', lignes: [{ asin: 'B0AAAAAAA1', quantite: 2 }] });
+test('facture déposée : articles associés aux ASIN, fournisseur et référence lus sur la facture', async () => {
   const d = await deposerDocument(db, { nom: 'libre.pdf', type: 'application/pdf', donnees: Buffer.from('%PDF libre').toString('base64') }, { extraire: extraireFaux });
   const f = validerDocument(db, d.id, {
     numero_facture: 'INV-77', date_facture: '2026-10-01', total: 96.98,
     lignes: [{ asin: 'B0AAAAAAA1', quantite: 2, prix_unitaire_ht: 25 }, { asin: 'B0AAAAAAA2', quantite: 3, prix_unitaire_ht: 10 }],
   });
-  assert.equal(f.commande_id, null, 'pas de rattachement implicite à la commande W-2001');
   const [facture] = listerFactures(db);
   assert.equal(facture.commande_id, null);
   assert.deepEqual(facture.lignes.map((l) => l.asin), ['B0AAAAAAA1', 'B0AAAAAAA2']);
   assert.equal(facture.document_id, d.id);
   assert.equal(facture.fournisseur, 'Walmart Canada', 'fournisseur lu sur la facture');
-  assert.equal(facture.numero_commande_ref, 'W-2001', 'n° de commande conservé, sans rattachement');
+  assert.equal(facture.numero_commande_ref, 'W-2001', 'référence de la facture conservée');
   // rattrapage pour une facture enregistrée sans ce numéro par la version précédente
   db.prepare('UPDATE factures SET numero_commande_ref = NULL').run();
   assert.equal(migrerReferencesFactures(db), 1);

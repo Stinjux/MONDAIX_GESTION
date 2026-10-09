@@ -280,9 +280,26 @@ export function ouvrirBase(chemin = cheminBase()) {
   db.exec('PRAGMA busy_timeout = 10000;');
   if (chemin !== ':memory:') db.exec('PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
+  ajouterColonnesManquantes(db);
   const inserer = db.prepare('INSERT OR IGNORE INTO parametres (cle, valeur) VALUES (?, ?)');
   for (const [cle, valeur] of Object.entries(PARAMETRES_DEFAUT)) inserer.run(cle, valeur);
   return db;
+}
+
+// Colonnes ajoutées après la création des tables : ajoutées aux bases existantes, sans perte de données.
+const COLONNES_AJOUTEES = [
+  ['factures', 'annulee', 'INTEGER NOT NULL DEFAULT 0'],
+  ['factures', 'date_annulation', 'TEXT'],
+  ['factures', 'motif_annulation', 'TEXT'],
+  ['envois', 'date_reception', 'TEXT'],
+  ['envoi_lignes', 'quantite_recue', 'INTEGER'],
+];
+
+function ajouterColonnesManquantes(db) {
+  for (const [table, colonne, type] of COLONNES_AJOUTEES) {
+    const existe = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === colonne);
+    if (!existe) db.exec(`ALTER TABLE ${table} ADD COLUMN ${colonne} ${type}`);
+  }
 }
 
 const profondeurs = new WeakMap();

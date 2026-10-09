@@ -97,6 +97,72 @@ export function modifierEnvoi(db, id, champs) {
   journaliser(db, 'envoi', id, 'modification', { avant: e, champs });
 }
 
+/**
+ * Réception constatée par Amazon : quantité reçue par ligne. Quand toutes les lignes ont
+ * une quantité reçue, l'envoi passe à « Reçu par Amazon » (date de réception enregistrée).
+ */
+export function enregistrerReception(db, envoiId, { lignes = [], date_reception } = {}) {
+  const e = db.prepare('SELECT * FROM envois WHERE id = ?').get(envoiId);
+  if (!e) throw new ErreurMetier('Envoi introuvable.', 404);
+  return transaction(db, () => {
+    for (const l of lignes) {
+      const ligne = db.prepare('SELECT * FROM envoi_lignes WHERE id = ? AND envoi_id = ?').get(Number(l.id), envoiId);
+      if (!ligne) throw new ErreurMetier('Ligne introuvable dans cet envoi.', 404);
+      let recue = null;
+      if (l.quantite_recue !== '' && l.quantite_recue !== null && l.quantite_recue !== undefined) {
+        recue = Number(l.quantite_recue);
+        if (!Number.isInteger(recue) || recue < 0) throw new ErreurMetier(`${ligne.asin} : quantité reçue invalide.`);
+      }
+      db.prepare('UPDATE envoi_lignes SET quantite_recue = ? WHERE id = ?').run(recue, ligne.id);
+    }
+    const restantes = db.prepare('SELECT COUNT(*) AS n FROM envoi_lignes WHERE envoi_id = ? AND quantite_recue IS NULL').get(envoiId).n;
+    const nbLignes = db.prepare('SELECT COUNT(*) AS n FROM envoi_lignes WHERE envoi_id = ?').get(envoiId).n;
+    if (nbLignes && !restantes && (e.statut === 'en_preparation' || e.statut === 'expedie')) {
+      const date = parserDate(date_reception) || e.date_reception || new Date().toISOString().slice(0, 10);
+      db.prepare("UPDATE envois SET statut = 'recu_amazon', date_reception = ? WHERE id = ?").run(date, envoiId);
+    } else if (date_reception !== undefined) {
+      db.prepare('UPDATE envois SET date_reception = ? WHERE id = ?').run(parserDate(date_reception), envoiId);
+    }
+    journaliser(db, 'envoi', envoiId, 'reception', { lignes, date_reception });
+    return suiviEnvoi(db, envoiId);
+  });
+}
+
+/** Tout est arrivé : quantité reçue = quantité envoyée pour chaque ligne. */
+export function toutRecu(db, envoiId, { date_reception } = {}) {
+  const lignes = db.prepare('SELECT id, quantite AS quantite_recue FROM envoi_lignes WHERE envoi_id = ?').all(envoiId);
+  if (!lignes.length) throw new ErreurMetier('Envoi vide.');
+  return enregistrerReception(db, envoiId, { lignes, date_reception });
+}
+
+/**
+ * État de suivi d'un envoi : en_preparation, en_transit (expédié, réception non saisie),
+ * partiel (réception saisie pour une partie des lignes), recu (tout reçu), ecart (reçu ≠ envoyé).
+ */
+export function suiviEnvoi(db, envoiId) {
+  const e = db.prepare('SELECT statut FROM envois WHERE id = ?').get(envoiId);
+  const lignes = db.prepare('SELECT quantite, quantite_recue FROM envoi_lignes WHERE envoi_id = ?').all(envoiId);
+  const envoyees = lignes.reduce((s, l) => s + l.quantite, 0);
+  const saisies = lignes.filter((l) => l.quantite_recue !== null);
+  const recues = saisies.reduce((s, l) => s + l.quantite_recue, 0);
+  const ecart = saisies.reduce((s, l) => s + (l.quantite_recue - l.quantite), 0);
+  let etat;
+  if (e.statut === 'en_preparation' && !saisies.length) etat = 'en_preparation';
+  else if (!saisies.length) etat = 'en_transit';
+  else if (saisies.length < lignes.length) etat = 'partiel';
+  else etat = ecart === 0 ? 'recu' : 'ecart';
+  const aVerifier = lignes.filter((l) => l.quantite_recue === null).reduce((s, l) => s + l.quantite, 0);
+  return { etat, unites_envoyees: envoyees, unites_recues: recues, ecart, lignes_a_verifier: lignes.length - saisies.length, unites_a_verifier: aVerifier };
+}
+
+export const ETATS_SUIVI = {
+  en_preparation: 'En préparation',
+  en_transit: 'En transit : réception à vérifier',
+  partiel: 'Réception partielle saisie',
+  recu: 'Tout reçu par Amazon',
+  ecart: 'Écart à la réception',
+};
+
 export function supprimerEnvoi(db, id) {
   const e = db.prepare('SELECT * FROM envois WHERE id = ?').get(id);
   if (!e) throw new ErreurMetier('Envoi introuvable.', 404);
@@ -108,12 +174,12 @@ export function listerEnvois(db) {
   return db
     .prepare(
       `SELECT e.*, COALESCE(SUM(el.quantite), 0) AS unites, COUNT(el.id) AS nb_lignes,
-         SUM(CASE WHEN el.commande_id IS NULL THEN 1 ELSE 0 END) AS lignes_sans_commande,
          (SELECT COALESCE(SUM(montant), 0) FROM depenses d WHERE d.envoi_id = e.id) AS frais
        FROM envois e LEFT JOIN envoi_lignes el ON el.envoi_id = e.id
        GROUP BY e.id ORDER BY COALESCE(e.date_envoi, e.created_at) DESC, e.id DESC`,
     )
-    .all();
+    .all()
+    .map((e) => ({ ...e, suivi: suiviEnvoi(db, e.id) }));
 }
 
 export function lireEnvoi(db, id) {
@@ -121,14 +187,12 @@ export function lireEnvoi(db, id) {
   if (!e) throw new ErreurMetier('Envoi introuvable.', 404);
   const lignes = db
     .prepare(
-      `SELECT el.*, p.titre, c.numero_commande FROM envoi_lignes el
-       JOIN produits p ON p.asin = el.asin LEFT JOIN commandes c ON c.id = el.commande_id
+      `SELECT el.*, p.titre FROM envoi_lignes el JOIN produits p ON p.asin = el.asin
        WHERE el.envoi_id = ? ORDER BY el.id`,
     )
-    .all(id)
-    .map((l) => ({ ...l, commandes_possibles: commandesPourAsin(db, l.asin) }));
+    .all(id);
   const depenses = db.prepare('SELECT * FROM depenses WHERE envoi_id = ? ORDER BY id').all(id);
-  return { ...e, lignes, depenses };
+  return { ...e, lignes, depenses, suivi: suiviEnvoi(db, id) };
 }
 
 /** Commandes contenant l'ASIN, avec les quantités reçues et déjà envoyées. */

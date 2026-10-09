@@ -1,7 +1,5 @@
 import { esc, references, definirDomaineAmazon } from './outils.js';
 import { pageTableauDeBord } from './pages/tableau.js';
-import { pageImportSheets } from './pages/importSheets.js';
-import { pageCommandes, pageCommande } from './pages/commandes.js';
 import { pageDepenses } from './pages/produits.js';
 import { pageAsins, pageAsin } from './pages/asins.js';
 import { pageDocument } from './pages/documents.js';
@@ -12,9 +10,6 @@ import { pageFournisseurs, pageFactures, pageParametres, pageJournal } from './p
 
 const ROUTES = [
   [/^$/, pageTableauDeBord],
-  [/^import-sheets$/, pageImportSheets],
-  [/^commandes$/, pageCommandes],
-  [/^commandes\/(\d+)$/, pageCommande],
   [/^factures$/, pageFactures],
   [/^factures\/document\/(\d+)$/, pageDocument],
   [/^asins$/, pageAsins],

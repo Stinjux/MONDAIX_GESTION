@@ -1,35 +1,6 @@
 // Détection flexible des colonnes d'un fichier importé.
 import { normaliserTexte, normaliserAsin, extraireDomaine, parserMontant, parserQuantite } from './parse.js';
 
-export const CHAMPS_SHEETS = {
-  asin: { libelle: 'ASIN', obligatoire: true, synonymes: ['asin', 'code asin', 'asin amazon', 'produit asin'] },
-  site: {
-    libelle: 'Site de commande (lien)',
-    obligatoire: false,
-    synonymes: ['site', 'site web', 'site de commande', 'commande sur', 'achete sur', 'lien', 'url', 'lien fournisseur', 'fournisseur', 'magasin', 'boutique', 'store', 'source', 'retailer', 'vendeur'],
-  },
-  quantite: {
-    libelle: 'Quantité achetée',
-    obligatoire: false,
-    synonymes: ['quantite', 'quantite achetee', 'qte', 'qty', 'quantity', 'nb', 'nombre', 'unites', 'units'],
-  },
-  total: {
-    libelle: 'Prix total de la commande',
-    obligatoire: false,
-    synonymes: ['prix total', 'prix total de la commande', 'total', 'total commande', 'montant', 'montant total', 'cout total', 'prix', 'total paye', 'order total'],
-  },
-  numero_commande: {
-    libelle: 'N° de commande (facultatif)',
-    obligatoire: false,
-    synonymes: ['numero de commande', 'no commande', 'n commande', 'commande', 'order', 'order id', 'order number', 'numero commande'],
-  },
-  date: {
-    libelle: 'Date de commande (facultatif)',
-    obligatoire: false,
-    synonymes: ['date', 'date de commande', 'date commande', 'order date', 'achete le'],
-  },
-};
-
 export const CHAMPS_INVENTAIRE = {
   asin: { libelle: 'ASIN', obligatoire: true, synonymes: ['asin'] },
   cost: {

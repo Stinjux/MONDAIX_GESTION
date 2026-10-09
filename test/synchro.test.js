@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { ouvrirBase } from '../src/db.js';
 import { configSource, correspondFiltre, synchroniserSource, etatSynchro, indicesGmail } from '../src/services/synchroEmail.js';
 import { listerEmails } from '../src/services/emails.js';
-import { creerCommande } from '../src/services/commandes.js';
 import { creerControleAcces, routePublique } from '../src/lib/acces.js';
 import { estExposee, verifierStockage } from '../src/demarrer.js';
 
@@ -75,11 +74,10 @@ test('filtres par défaut : objet « order » / « shopping » pour Gmail ; Amaz
   assert.equal(configSource('gmail', { GMAIL_UTILISATEUR: ' moi@gmail.com ', GMAIL_MOT_DE_PASSE: 'x' }).utilisateur, 'moi@gmail.com');
 });
 
-test('synchro Gmail : lecture seule, dossier « Tous les messages », filtre, rapprochement, incrémental', async () => {
-  const cid = creerCommande(db, { numero_commande: '200012345678', lignes: [{ asin: 'B0AAAAAAA1', quantite: 1 }] });
+test('synchro Gmail : lecture seule, dossier « Tous les messages », filtre, association ASIN, incrémental', async () => {
   const messages = [
     { uid: 1, de: 'orders@walmart.ca', sujet: 'Old order', date: new Date('2026-07-15'), source: eml({ de: 'orders@walmart.ca', sujet: 'Old order', corps: 'x', id: 'a1' }) },
-    { uid: 2, de: 'orders@walmart.ca', sujet: 'Your order confirmation', date: new Date('2026-08-10'), source: eml({ de: 'Walmart <orders@walmart.ca>', sujet: 'Your order confirmation', corps: 'Numéro de commande : 200012345678\nTotal : 20,00 $ — été', id: 'a2' }) },
+    { uid: 2, de: 'orders@walmart.ca', sujet: 'Your order confirmation', date: new Date('2026-08-10'), source: eml({ de: 'Walmart <orders@walmart.ca>', sujet: 'Your order confirmation', corps: 'Item B0AAAAAAA1\nTotal : 20,00 $ — été', id: 'a2' }) },
     { uid: 3, de: 'news@shop.ca', sujet: 'Promo de la semaine', date: new Date('2026-08-11'), source: eml({ de: 'news@shop.ca', sujet: 'Promo', corps: 'x', id: 'a3' }) },
   ];
   const faux = fauxServeur(messages);
@@ -91,7 +89,7 @@ test('synchro Gmail : lecture seule, dossier « Tous les messages », filtre, ra
   assert.ok(faux.appels.recherches[0].since, 'première synchro depuis la date de départ');
   const emails = listerEmails(db, { source: 'gmail' });
   assert.equal(emails.length, 1);
-  assert.equal(emails[0].commande_id, cid, 'rapprochement automatique sur le n° exact');
+  assert.deepEqual(emails[0].liens.map((l) => l.valeur), ['B0AAAAAAA1'], 'associé automatiquement à l’ASIN cité');
   assert.match(emails[0].sujet, /order confirmation/);
   assert.match(db.prepare('SELECT corps FROM emails').get().corps, /été/, 'UTF-8 décodé correctement');
 
@@ -136,7 +134,7 @@ test('accès protégé par mot de passe, webhook et /sante publics', () => {
   assert.equal(controler(req('admin:secret')), 'bloque');
   assert.ok(routePublique('POST', '/api/emails/neo/webhook'));
   assert.ok(routePublique('GET', '/sante'));
-  assert.ok(!routePublique('GET', '/api/commandes'));
+  assert.ok(!routePublique('GET', '/api/factures'));
   assert.equal(creerControleAcces({})(req()), 'ok', 'sans mot de passe (usage local) : ouvert');
 });
 
