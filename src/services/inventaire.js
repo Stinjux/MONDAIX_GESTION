@@ -31,8 +31,11 @@ export function importerInventaire(db, { texte, mapping, nom }) {
       .prepare("INSERT INTO imports (type, nom, mapping, entetes, nb_lignes) VALUES ('inventaire', ?, ?, ?, ?)")
       .run(nom || 'inventaire', JSON.stringify(map), JSON.stringify(entetes), lignes.length);
     const importId = Number(imp.lastInsertRowid);
-    const resultat = { import_id: importId, produits: 0, couts_ajoutes: 0, ecarts: [], rejets: [] };
-    const stock = new Map(); // ASIN → quantité (plusieurs SKU d'un même ASIN sont additionnés)
+    const resultat = { import_id: importId, produits: 0, couts_ajoutes: 0, ecarts: [], rejets: [], doublons: [] };
+    // ASIN → quantité. Plusieurs SKU d'un même ASIN sont additionnés ; une ligne répétée pour le
+    // même SKU remplace la précédente (jamais comptée deux fois).
+    const parSku = new Map(); // « ASIN | SKU » → quantité
+    const lignesParAsin = new Map();
     lignes.forEach((l, i) => {
       const asin = normaliserAsin(l[map.asin]);
       if (!asin) {
@@ -46,7 +49,11 @@ export function importerInventaire(db, { texte, mapping, nom }) {
       if (map.quantite !== undefined) {
         // Quantité vide, nulle ou illisible : 0.
         const q = parserQuantite(l[map.quantite]) ?? 0;
-        stock.set(asin, (stock.get(asin) || 0) + q);
+        const sku = map.sku !== undefined ? String(l[map.sku] || '').trim() : '';
+        const cle = sku ? `${asin}|${sku}` : `${asin}|ligne-${i}`;
+        if (sku && parSku.has(cle)) resultat.doublons.push({ ligne: i + 2, asin, sku });
+        parSku.set(cle, { asin, q });
+        lignesParAsin.set(asin, (lignesParAsin.get(asin) || 0) + 1);
       }
       const cles = Object.keys(maj);
       if (cles.length) {
@@ -69,6 +76,10 @@ export function importerInventaire(db, { texte, mapping, nom }) {
         }
       }
     });
+    const stock = new Map();
+    for (const { asin, q } of parSku.values()) stock.set(asin, (stock.get(asin) || 0) + q);
+    // ASIN présents sur plusieurs lignes (SKU différents) : quantités additionnées, signalées.
+    resultat.asin_plusieurs_lignes = [...lignesParAsin].filter(([, n]) => n > 1).map(([asin, n]) => ({ asin, lignes: n }));
     // Photo du stock de cet import
     const releve = db.prepare('INSERT INTO stock_releves (import_id, asin, quantite) VALUES (?, ?, ?)');
     for (const [asin, q] of stock) {

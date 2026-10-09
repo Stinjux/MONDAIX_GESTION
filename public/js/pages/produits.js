@@ -42,7 +42,11 @@ export function brancherInventaire(zone) {
     const r = await tenter(() => post('/api/imports/inventaire', { texte: etatInv.texte, mapping: etatInv.analyse.mapping, nom: etatInv.nom }));
     if (!r) return;
     const st = r.stock ? ` Stock : ${r.stock.total} unité(s)${r.stock.ecart === null ? '' : ` (${r.stock.ecart >= 0 ? '+' : '−'}${Math.abs(r.stock.ecart)} depuis l’import précédent)`}.` : '';
-    toast(`${r.produits} ASIN mis à jour, ${r.couts_ajoutes} coût(s) ajouté(s), ${r.ecarts.length} écart(s), ${r.rejets.length} rejet(s).${st}`);
+    const doublons = r.doublons.length ? ` ${r.doublons.length} ligne(s) répétée(s) pour un même SKU ignorée(s).` : '';
+    const multi = r.asin_plusieurs_lignes.length
+      ? ` ${r.asin_plusieurs_lignes.length} ASIN sur plusieurs lignes (SKU différents, quantités additionnées) : ${r.asin_plusieurs_lignes.slice(0, 5).map((x) => x.asin).join(', ')}${r.asin_plusieurs_lignes.length > 5 ? '…' : ''}.`
+      : '';
+    toast(`Stock chez Amazon remplacé par cet import. ${r.produits} ASIN mis à jour, ${r.couts_ajoutes} coût(s) ajouté(s), ${r.ecarts.length} écart(s), ${r.rejets.length} rejet(s).${st}${doublons}${multi}`, { duree: 12000 });
     etatInv.analyse = null;
     rafraichir();
   };

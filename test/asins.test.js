@@ -338,3 +338,15 @@ test('envoi arrivé chez Amazon mais réception non confirmée : pas de double c
   const b = listerAsins(db).find((x) => x.asin === 'B0AAAAAAA2').stock_total;
   assert.deepEqual([b.amazon, b.en_transit, b.a_envoyer, b.total], [6, 4, 0, 10]);
 });
+
+test('import : une ligne répétée pour le même SKU ne double pas le stock ; SKU différents additionnés et signalés', () => {
+  const r = importerInventaire(db, {
+    texte: 'sku,asin,qty\nSKU-A,B0AAAAAAA1,14\nSKU-A,B0AAAAAAA1,14\nSKU-B,B0AAAAAAA2,3\nSKU-C,B0AAAAAAA2,2\n',
+    mapping: { sku: 0, asin: 1, quantite: 2 },
+    nom: 'inv',
+  });
+  assert.equal(etatStock(db).parAsin.get('B0AAAAAAA1').quantite, 14, 'même SKU répété : 14, pas 28');
+  assert.equal(etatStock(db).parAsin.get('B0AAAAAAA2').quantite, 5);
+  assert.equal(r.doublons.length, 1);
+  assert.deepEqual(r.asin_plusieurs_lignes, [{ asin: 'B0AAAAAAA1', lignes: 2 }, { asin: 'B0AAAAAAA2', lignes: 2 }]);
+});
