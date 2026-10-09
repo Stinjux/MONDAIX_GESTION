@@ -1,5 +1,8 @@
 // Import du Google Sheet de suivi des achats (Fichier › Télécharger › CSV), avec ou sans ligne d'en-tête.
-// Colonnes : ASIN, site (fournisseur), quantité, total payé TTC, date et, si présente, statut.
+// Colonnes lues par position, quels que soient les intitulés de l'en-tête :
+//   A ASIN · B boutique · C quantité · D montant total payé (TTC) · E date de commande
+// et, seulement si son en-tête s'appelle « Statut », une colonne de statut. Les colonnes de totaux
+// et de légende à droite (TOTAL $, TOTAL QT, legende…) sont ignorées.
 //
 // Règles :
 // - chaque ligne devient une facture (source : Google Sheet) ; réimporter le Sheet met à jour les
@@ -15,14 +18,7 @@ import { annulerFacture, creerFacture, retablirFacture } from './factures.js';
 import { creerFournisseur, listerFournisseurs, trouverParDomaine } from './fournisseurs.js';
 import { empreinteTexte } from './inventaire.js';
 
-const ENTETES = {
-  asin: ['asin'],
-  site: ['site', 'fournisseur', 'magasin', 'lien', 'url', 'store', 'source', 'detaillant'],
-  quantite: ['quantite', 'qte', 'qt', 'qty', 'quantity', 'unites'],
-  total: ['total', 'prix', 'montant', 'cout', 'cout total', 'prix total', 'total ttc', 'price'],
-  date: ['date', 'date achat', 'date commande', 'date facture'],
-  statut: ['statut', 'etat', 'status'],
-};
+const ENTETES_STATUT = ['statut', 'etat', 'status'];
 
 /** « reçu », « en attente », « annulé / remboursé » → recu | en_attente | annule (null si non reconnu). */
 export function statutAchat(valeur) {
@@ -44,23 +40,18 @@ function reperer(lignes) {
     if (n > meilleur) [colAsin, meilleur] = [c, n];
   }
   if (colAsin < 0) throw new ErreurMetier('Aucun ASIN trouvé : ce fichier n’est pas votre Google Sheet d’achats (Fichier › Télécharger › CSV).');
-  const premiere = lignes[0].map((h) => normaliserTexte(h));
-  const enTete = !normaliserAsin(lignes[0][colAsin]) && premiere.some((h) => ENTETES.asin.includes(h));
-  if (enTete) {
-    const map = {};
-    for (const [champ, noms] of Object.entries(ENTETES)) {
-      const i = premiere.findIndex((h) => noms.includes(h));
-      if (i >= 0) map[champ] = i;
-    }
-    for (const champ of ['quantite', 'total']) {
-      if (map[champ] === undefined) throw new ErreurMetier(`Colonne « ${ENTETES[champ][0]} » introuvable dans l’en-tête du Sheet.`);
-    }
-    return { map, debut: 1 };
-  }
-  // Sans en-tête : ASIN | site | quantité | total | date | statut (si la colonne contient des statuts).
+  // Colonnes à partir de celle des ASIN : boutique, quantité, montant total, date de commande.
   const map = { asin: colAsin, site: colAsin + 1, quantite: colAsin + 2, total: colAsin + 3, date: colAsin + 4 };
-  if (lignes.some((l) => statutAchat(l[colAsin + 5]))) map.statut = colAsin + 5;
-  return { map, debut: 0 };
+  // Ligne d'en-tête (ASIN, Store name, QT, $, Order Date…) : sautée ; ses intitulés ne servent qu'à
+  // trouver une éventuelle colonne « Statut » (jamais la colonne « legende »).
+  const enTete = !normaliserAsin(lignes[0][colAsin]);
+  if (enTete) {
+    const i = lignes[0].findIndex((h) => ENTETES_STATUT.includes(normaliserTexte(h)));
+    if (i >= 0) map.statut = i;
+  } else if (lignes.some((l) => statutAchat(l[colAsin + 5]))) {
+    map.statut = colAsin + 5; // sans en-tête : statut en F s'il contient des statuts
+  }
+  return { map, debut: enTete ? 1 : 0 };
 }
 
 function fournisseurPour(db, site, cache) {
@@ -144,7 +135,10 @@ export function importerAchats(db, { texte, nom }) {
     const quantite = parserQuantite(val(l, 'quantite'));
     const total = parserMontant(val(l, 'total'));
     const date = parserDate(val(l, 'date'));
-    if (!quantite) return void r.rejets.push({ ligne: n, asin, motif: 'quantité vide ou à 0 : ligne ignorée' });
+    if (!quantite) {
+      const motif = total ? `quantité manquante pour ${val(l, 'total')} $ : ligne ignorée, complétez la quantité (colonne C)` : 'quantité et montant à 0 : ligne ignorée';
+      return void r.rejets.push({ ligne: n, asin, motif });
+    }
     if (total === null) return void r.rejets.push({ ligne: n, asin, motif: `total illisible « ${val(l, 'total')} » : ligne ignorée` });
     if (total === 0) r.a_verifier.push({ ligne: n, asin, motif: 'total à 0 $' });
     if (!date) r.a_verifier.push({ ligne: n, asin, motif: 'date manquante ou illisible' });

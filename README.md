@@ -99,7 +99,8 @@ Alternative cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.
 Les trois fichiers se déposent au même endroit, ensemble ou séparément ; leur type est reconnu à partir du contenu.
 La page indique la date du dernier import de chacun et signale ceux de plus de 7 jours (mise à jour conseillée chaque lundi).
 
-- **Google Sheet d’achats** (CSV, avec ou sans en-tête : ASIN, site, quantité, total TTC, date, statut facultatif) :
+- **Google Sheet d’achats** (CSV, avec ou sans en-tête ; colonnes lues par position : A ASIN, B boutique, C quantité,
+  D montant total payé TTC, E date de commande ; statut seulement si une colonne s’intitule « Statut ») :
   un fichier par mois, reconnu à son nom (« OCTOBER orders », « septembre 2026 »… ; sinon mois le plus fréquent des dates).
   Chaque ligne devient une facture « Google Sheet ». Pour un mois, le dernier fichier importé fait foi : ligne ajoutée →
   facture créée ; ligne modifiée (quantité, total, statut, date ou site) → facture mise à jour, jamais en double ;

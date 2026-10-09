@@ -140,3 +140,30 @@ test('un fichier par mois : le dernier import du mois fait foi, les autres mois 
   const mois = resumeImports(db).achats.mois.map((m) => [m.periode, m.nom, m.factures]);
   assert.deepEqual(mois, [['2026-11', 'NOVEMBER orders.csv', 3], ['2026-10', 'Mondaix - OCTOBER orders (3).csv', 3], ['2026-09', 'Mondaix - SEPTEMBER orders.csv', 1]]);
 });
+
+test('Sheet avec en-tête « ASIN, Store name, QT, $, Order Date » : colonnes A à E lues par position, légende ignorée', () => {
+  // Données fictives, même disposition que le Sheet mensuel réel (totaux et légende à droite).
+  const texte = [
+    'ASIN,Store name ,QT,$,Order Date,,,,TOTAL $,TOTAL QT,,legende',
+    'B0TEST0001,exemple.com,0,0,02/09/2026,,,,"652,01",44,,recu',
+    'B0TEST0002,https://boutique.ca/,5,"150,62",02/09/2026,,,,,,,en attente',
+    'B0TEST0003,https://www.magasin.com/,5,"43,12",02/09/2026,,,,,,,remboursé/annulé',
+    'B0TEST0004,https://www.autre.com/produit?x=1,14,199.24,15/09/2026,,,,,,,',
+    'B0TEST0005,walmart.ca,,263,28/09/2026,,,,,,,',
+  ].join('\n');
+  const r = importerAchats(db, { texte, nom: 'SEPTEMBRE ORDERS - Feuille 1.csv' });
+  assert.deepEqual([r.periode, r.creees], ['2026-09', 3]);
+  assert.deepEqual(r.rejets.map((x) => [x.asin, x.motif]), [
+    ['B0TEST0001', 'quantité et montant à 0 : ligne ignorée'],
+    ['B0TEST0005', 'quantité manquante pour 263 $ : ligne ignorée, complétez la quantité (colonne C)'],
+  ]);
+  const lignes = db
+    .prepare('SELECT fl.asin, fl.quantite q, f.total, f.date_facture d, fo.nom, f.en_attente, f.annulee FROM factures f JOIN facture_lignes fl ON fl.facture_id = f.id LEFT JOIN fournisseurs fo ON fo.id = f.fournisseur_id ORDER BY fl.asin')
+    .all()
+    .map((x) => [x.asin, x.q, x.total, x.d, x.nom, x.en_attente, x.annulee]);
+  assert.deepEqual(lignes, [
+    ['B0TEST0002', 5, 150.62, '2026-09-02', 'Boutique', 0, 0],
+    ['B0TEST0003', 5, 43.12, '2026-09-02', 'Magasin', 0, 0],
+    ['B0TEST0004', 14, 199.24, '2026-09-15', 'Autre', 0, 0],
+  ], 'la colonne « legende » n’est pas un statut');
+});
