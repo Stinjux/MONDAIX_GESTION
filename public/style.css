@@ -367,11 +367,6 @@ th .formule::after { left: auto; right: 0; transform: none; }
 .carte-import .depot { padding: var(--e4); }
 .carte-import-date { display: flex; flex-wrap: wrap; align-items: center; gap: var(--e2); }
 .pile-resultats details { margin-top: var(--e2); }
-.bloc-auto { display: flex; flex-direction: column; gap: var(--e2); padding: var(--e3); background: var(--fond); border: var(--trait-ligne) solid var(--bord); }
-.bloc-auto .actions { margin: 0; }
-.etapes { padding-left: var(--e4); }
-.etapes li { margin-bottom: var(--e2); }
-.script-sheet { width: 100%; font-size: 12px; white-space: pre; overflow: auto; }
 .liste-mois { list-style: none; margin: 0; padding: 0; border-top: var(--trait-ligne) solid var(--bord); }
 .liste-mois li { display: grid; grid-template-columns: 9.5em 1fr; column-gap: var(--e2); padding: var(--e1) 0; border-bottom: var(--trait-ligne) solid var(--bord); }
 .liste-mois li .aide { grid-column: 2; }

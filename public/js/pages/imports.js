@@ -1,4 +1,4 @@
-import { api, post, badge, date, esc, entetePage, icone, toast, lireFichierTexte, modale, confirmer, tenter } from '../outils.js';
+import { api, post, badge, date, esc, entetePage, icone, toast, lireFichierTexte } from '../outils.js';
 import { rafraichir } from '../app.js';
 import { nombre } from './tableau.js';
 
@@ -58,97 +58,12 @@ function carte(type, e, frequence) {
       <div class="tuile-tete"><h2 id="titre-${type}" class="sans-marge">${esc(f.titre)}</h2>${icone(f.icone, 20)}</div>
       <p class="carte-import-date"><strong>${quand(e)}</strong> ${etat}</p>
       <p class="aide">${details(type, e) || '&nbsp;'}</p>
-      ${type === 'achats' ? blocAuto(e.auto) : ''}
       ${type === 'achats' ? listeMois(e.mois) : ''}
       <label class="depot" for="fichier-${type}" data-depot="${type}">${icone('upload', 20)}<span>Glissez le fichier ici ou cliquez pour le choisir</span>
         <input type="file" id="fichier-${type}" data-type="${type}" accept=".csv,.tsv,.txt" multiple></label>
       <p class="aide">${esc(f.source)}</p>
       <p><a href="${f.lien[0]}">${esc(f.lien[1])}</a></p>
     </section>`;
-}
-
-function depuis(minutes) {
-  if (minutes < 1) return 'à l’instant';
-  if (minutes < 60) return `il y a ${minutes} min`;
-  if (minutes < 48 * 60) return `il y a ${Math.floor(minutes / 60)} h`;
-  return `il y a ${Math.floor(minutes / 1440)} jours`;
-}
-
-/** Lecture automatique du Sheet (script Apps Script) : état et actions. */
-function blocAuto(a) {
-  if (!a?.configure) {
-    return `<div class="bloc-auto"><p class="sans-marge"><strong>Lecture automatique</strong> ${badge('désactivée')}</p>
-      <p class="aide sans-marge">Votre Sheet envoie lui-même ses onglets mensuels toutes les 5 minutes, couleurs comprises (vert = reçu, orange = en attente, rouge = annulé). Il reste privé.</p>
-      <button type="button" class="principal" id="activer-auto">${icone('refresh-cw')}Activer la lecture automatique</button></div>`;
-  }
-  const s = a.synchro;
-  const etat = !s
-    ? badge('en attente du premier envoi', 'alerte')
-    : a.interrompue
-      ? badge(`interrompue · dernier envoi ${depuis(a.minutes_depuis)}`, 'alerte')
-      : badge(`active · dernier envoi ${depuis(a.minutes_depuis)}`, 'ok');
-  const erreurs = (s?.onglets || []).filter((o) => o.etat === 'erreur');
-  return `<div class="bloc-auto"><p class="sans-marge"><strong>Lecture automatique</strong> ${etat}</p>
-    ${s ? `<p class="aide sans-marge">${esc(s.classeur)} · onglets lus : ${esc(s.onglets.map((o) => o.onglet).join(', ') || 'aucun onglet mensuel')}</p>` : '<p class="aide sans-marge">Collez le script dans votre Sheet et lancez « installerMondaix » (bouton « Voir le script »).</p>'}
-    ${erreurs.map((o) => `<div class="message erreur">${esc(o.onglet)} : ${esc(o.motif)}</div>`).join('')}
-    <div class="actions"><button type="button" id="voir-script">${icone('file-text')}Voir le script</button>
-      <button type="button" class="petit" id="nouveau-jeton">Nouveau jeton</button></div></div>`;
-}
-
-async function afficherScript() {
-  const c = await api(`/api/imports/achats/connexion?origine=${encodeURIComponent(location.origin)}`);
-  if (!c.script) return toast('Script indisponible : activez d’abord la lecture automatique.', true);
-  await modale({
-    titre: 'Lecture automatique du Google Sheet',
-    contenu: `<ol class="etapes">
-        <li>Dans votre Google Sheet : <strong>Extensions › Apps Script</strong>.</li>
-        <li>Effacez le contenu de l’éditeur, collez le script ci-dessous (bouton « Copier »), puis <strong>Enregistrer</strong>.</li>
-        <li>En haut, choisissez la fonction <strong>installerMondaix</strong> puis <strong>Exécuter</strong>. Autorisez l’accès avec votre compte Google
-          (si Google affiche « Application non validée » : <em>Paramètres avancés › Accéder au projet</em> ; c’est votre propre script).</li>
-        <li>C’est tout : le Sheet est envoyé toutes les 5 minutes. Un menu <strong>Mondaix › Envoyer maintenant</strong> apparaît aussi dans le Sheet.</li>
-      </ol>
-      <p class="aide">Seuls les onglets dont le nom contient un mois (« OCTOBER orders », « septembre »…) sont importés. Le script contient votre jeton personnel : ne le partagez pas.</p>
-      <textarea id="script-sheet" class="mono script-sheet" readonly rows="14" aria-label="Script Apps Script">${esc(c.script)}</textarea>
-      <div class="actions"><button type="button" class="principal" id="copier-script">${icone('check')}Copier le script</button></div>`,
-    apresOuverture: (form) => {
-      form.querySelector('#copier-script').onclick = async () => {
-        const zone = form.querySelector('#script-sheet');
-        try {
-          await navigator.clipboard.writeText(zone.value);
-        } catch {
-          zone.select();
-          document.execCommand('copy'); // presse-papiers indisponible (contexte non sécurisé)
-        }
-        toast('Script copié.');
-      };
-    },
-  });
-}
-
-function brancherAuto(zone) {
-  const activer = zone.querySelector('#activer-auto');
-  if (activer) {
-    activer.onclick = async () => {
-      if ((await tenter(() => post('/api/imports/achats/jeton'))) === undefined) return;
-      await afficherScript();
-      rafraichir();
-    };
-  }
-  const voir = zone.querySelector('#voir-script');
-  if (voir) voir.onclick = afficherScript;
-  const nouveau = zone.querySelector('#nouveau-jeton');
-  if (nouveau) {
-    nouveau.onclick = async () => {
-      const ok = await confirmer({
-        titre: 'Créer un nouveau jeton ?',
-        message: 'Le script déjà installé dans votre Sheet cessera de fonctionner : il faudra y coller le nouveau script.',
-        libelle: 'Nouveau jeton',
-      });
-      if (!ok || (await tenter(() => post('/api/imports/achats/jeton'))) === undefined) return;
-      await afficherScript();
-      rafraichir();
-    };
-  }
 }
 
 /** Résumé lisible du résultat d'un import. */
@@ -246,13 +161,12 @@ export async function pageImports(zone) {
       ${rendreJournal()}
       <h2>Sans doublon</h2>
       <ul class="aide">
-        <li><strong>Google Sheet</strong> : un fichier par mois, reconnu à son nom (« AUGUST orders », « SEPTEMBER orders »…). Pour un mois, le dernier fichier importé fait foi : lignes ajoutées → achats créés, lignes modifiées → mises à jour, lignes retirées → achats annulés (gardés dans l’historique) ; jamais de doublon, et les autres mois ne sont pas touchés. Le total est TTC ; le montant HT en est déduit (TPS + TVQ, réglable dans Paramètres). Statut : avec la lecture automatique, les couleurs sont lues (vert = reçu, orange = en attente, rouge = annulé) ; pour un import CSV manuel, ajoutez une colonne F « Statut » (les couleurs ne sont pas exportées en CSV).</li>
+        <li><strong>Google Sheet</strong> : un fichier par mois, reconnu à son nom (« AUGUST orders », « SEPTEMBER orders »…). Pour un mois, le dernier fichier importé fait foi : lignes ajoutées → achats créés, lignes modifiées → mises à jour, lignes retirées → achats annulés (gardés dans l’historique) ; jamais de doublon, et les autres mois ne sont pas touchés. Le total est TTC ; le montant HT en est déduit (TPS + TVQ, réglable dans Paramètres). Pour le statut, ajoutez une colonne F « Statut » : reçu, en attente ou annulé (les couleurs ne sont pas exportées en CSV).</li>
         <li><strong>Aura</strong> : chaque import est une photo complète du stock Amazon ; seule la variation avec la photo précédente compte. Un fichier identique au dernier import est refusé, et un nouvel import le même jour remplace celui du jour.</li>
         <li><strong>Rapport de commandes</strong> : une commande déjà importée est mise à jour, jamais comptée deux fois ; des périodes qui se chevauchent ne posent donc aucun problème.</li>
       </ul>
     </div>`;
 
-  brancherAuto(zone);
   const page = zone.querySelector('#zone-imports');
   zone.querySelectorAll('input[type=file][data-type]').forEach((input) => {
     input.onchange = () => input.files.length && traiter([...input.files], input.dataset.type);

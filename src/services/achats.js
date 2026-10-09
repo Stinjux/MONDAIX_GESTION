@@ -129,37 +129,8 @@ export function moisDuFichier(nom, dates = [], maintenant = new Date()) {
 export function importerAchats(db, { texte, nom }) {
   const lignes = parserCsv(texte);
   if (!lignes.length) throw new ErreurMetier('Fichier vide.');
-  return importerLignesAchats(db, { lignes, nom, empreinte: empreinteTexte(texte) });
-}
-
-/**
- * Couleur de fond d'une ligne du Sheet → statut (légende : vert = reçu, orange / jaune = en attente,
- * rouge = remboursé / annulé). Blanc, gris ou couleur inconnue : null.
- */
-export function statutCouleur(couleur) {
-  const m = String(couleur || '').trim().match(/^#?([0-9a-f]{6})$/i);
-  if (!m) return null;
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255);
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  const d = max - min;
-  if (d < 0.08 || l > 0.96) return null; // blanc, gris, noir
-  const h = (max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60;
-  const teinte = (h + 360) % 360;
-  if (teinte >= 70 && teinte <= 180) return 'recu';
-  if (teinte >= 20 && teinte < 70) return 'en_attente';
-  if (teinte < 20 || teinte >= 330) return 'annule';
-  return null;
-}
-
-/**
- * Import des lignes d'un onglet mensuel (fichier CSV ou envoi automatique du Sheet).
- * couleurs[i] = couleur de fond de la ligne i (statut quand il n'y a pas de colonne Statut).
- * siIdentique : 'erreur' (import manuel) ou 'ignorer' (envoi automatique, rien à faire).
- */
-export function importerLignesAchats(db, { lignes, couleurs = null, nom, empreinte, siIdentique = 'erreur' }) {
   const { map, debut } = reperer(lignes);
+  const empreinte = empreinteTexte(texte);
   const taux = Number(lireParametre(db, 'achats.taux_taxes') ?? 14.975) / 100;
   const val = (l, champ) => (map[champ] === undefined ? '' : String(l[map[champ]] ?? '').trim());
 
@@ -168,7 +139,6 @@ export function importerLignesAchats(db, { lignes, couleurs = null, nom, emprein
   const achats = [];
   lignes.slice(debut).forEach((l, i) => {
     const n = i + debut + 1; // n° de ligne dans le Sheet
-    const couleur = couleurs ? couleurs[i + debut] : null;
     const asin = normaliserAsin(val(l, 'asin'));
     if (!asin) return; // ligne vide, légende, totaux…
     const quantite = parserQuantite(val(l, 'quantite'));
@@ -178,7 +148,7 @@ export function importerLignesAchats(db, { lignes, couleurs = null, nom, emprein
     if (total === null) return void r.rejets.push({ ligne: n, asin, motif: `total illisible « ${val(l, 'total')} » : ligne ignorée` });
     if (total === 0) r.a_verifier.push({ ligne: n, asin, motif: 'total à 0 $' });
     if (!date) r.a_verifier.push({ ligne: n, asin, motif: 'date manquante ou illisible' });
-    const statut = (map.statut === undefined ? null : statutAchat(val(l, 'statut'))) || statutCouleur(couleur) || 'recu';
+    const statut = map.statut === undefined ? 'recu' : statutAchat(val(l, 'statut')) || 'recu';
     achats.push({ n, asin, quantite, total, date, statut, site: val(l, 'site') });
   });
 
@@ -190,7 +160,6 @@ export function importerLignesAchats(db, { lignes, couleurs = null, nom, emprein
     .prepare("SELECT nom, created_at, empreinte FROM imports WHERE type = 'sheets' AND periode = ? ORDER BY id DESC LIMIT 1")
     .get(periode);
   if (dernier?.empreinte === empreinte) {
-    if (siIdentique === 'ignorer') return { inchange: true, periode, mois: libelleMois(periode) };
     throw new ErreurMetier(`Fichier identique au dernier import de ${libelleMois(periode)} (${dernier.nom}, ${dernier.created_at.slice(0, 10)}) : rien n’a changé.`, 409);
   }
 

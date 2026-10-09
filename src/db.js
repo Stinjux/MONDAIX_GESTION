@@ -310,6 +310,8 @@ export function ouvrirBase(chemin = cheminBase()) {
   ajouterColonnesManquantes(db);
   const inserer = db.prepare('INSERT OR IGNORE INTO parametres (cle, valeur) VALUES (?, ?)');
   for (const [cle, valeur] of Object.entries(PARAMETRES_DEFAUT)) inserer.run(cle, valeur);
+  // Lecture automatique du Google Sheet par script Apps Script retirée : jeton et état effacés.
+  db.exec("DELETE FROM parametres WHERE cle IN ('sheet.webhook_token', 'sheet.derniere_synchro')");
   return db;
 }
 

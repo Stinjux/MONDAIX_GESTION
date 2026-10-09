@@ -106,12 +106,6 @@ La page indique la date du dernier import de chacun et signale ceux de plus de 7
   ligne retirée → facture annulée (gardée dans l’historique, rétablie si la ligne revient). Les autres mois ne sont pas touchés.
   HT = total ÷ (1 + taux de taxes, 14,975 % par défaut, réglable dans Paramètres). Aucun coût unitaire n’est déduit du Sheet.
   Statut : reçu (défaut), en attente du fournisseur (hors stock « à envoyer »), annulé / remboursé (facture annulée).
-- **Lecture automatique du Google Sheet** (page Imports › « Activer la lecture automatique ») : un script Apps Script
-  collé dans le Sheet (Extensions › Apps Script, puis exécuter `installerMondaix`) envoie ses onglets toutes les 5 minutes
-  à `POST /api/imports/achats/webhook` (en-tête `X-Mondaix-Token`, jeton généré par l’application). Seuls les onglets
-  dont le nom contient un mois sont importés ; un onglet inchangé n’est pas réimporté. Le Sheet reste privé et la
-  couleur de fond de la colonne A donne le statut (vert = reçu, orange / jaune = en attente, rouge = annulé), sauf
-  colonne Statut. « Nouveau jeton » désactive l’ancien script.
 - **Inventaire Aura** : un fichier identique au dernier import est refusé ; un nouvel import avec quantités le même jour
   remplace la photo du jour.
 - **Rapport de commandes Amazon** : un rapport identique est refusé ; les commandes déjà connues sont mises à jour.
