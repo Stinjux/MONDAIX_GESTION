@@ -6,7 +6,7 @@ import { STATUTS_ENVOI } from './envois.js';
 import { depensesFacturesParAsin, partFactureAsin, totalFacture } from './factures.js';
 import { coutComplet, coutRetenu, historiqueCouts, LIBELLES_SOURCE_COUT, TYPES_DEPENSE } from './couts.js';
 import { emailsPourAsin } from './emails.js';
-import { etatStock, historiqueStockAsin, ventesEstimees } from './inventaire.js';
+import { bilanStock, etatStock, historiqueStockAsin } from './inventaire.js';
 
 // Unités achetées = articles des factures non annulées ; reçues = quantités confirmées par Amazon.
 const SQL_QUANTITES = `
@@ -25,45 +25,39 @@ const STOCK_VIDE = { quantite: 0, precedente: null, ecart: null, absent: true };
 // ASIN sans facture associée.
 const DEPENSES_VIDES = { montant: 0, ht: 0, frais: 0, unites: 0, nb_factures: 0, estimee: false, cout_moyen_unite: null };
 
+const BILAN_VIDE = { initial: 0, envois_apres_initial: 0, restock_non_saisi: 0, vendues: 0, en_transit: 0 };
+
 /**
- * Stock total d'un ASIN, cohérent avec les achats : chaque unité vient d'une facture et n'est comptée
- * qu'une fois, chez Amazon, en transit ou chez vous.
- *   total = achetées − vendues (estimées), jamais moins que le stock vu chez Amazon
- *           (sans facture : chez Amazon + en transit) ;
- *   en transit = envois non confirmés, sans dépasser ce qui n'est pas déjà chez Amazon
- *                (un envoi arrivé mais non confirmé n'est pas compté deux fois) ;
- *   à envoyer = le reste, sans dépasser les unités achetées non expédiées.
+ * Stock total d'un ASIN, chaque unité comptée une seule fois :
+ *   chez Amazon = dernier import (photo complète, remplace la précédente) ;
+ *   en transit  = envois expédiés depuis le dernier import ;
+ *   sorties de chez vous = stock initial (1er import) + envois enregistrés après lui
+ *                          + restocks non saisis (hausses sans envoi) + en transit ;
+ *   à envoyer   = unités achetées (factures non annulées) − sorties (jamais négatif) ;
+ *   total       = chez Amazon + en transit + à envoyer.
  * Chez Amazon au-delà des achats : une facture manque probablement (signalé).
  */
-export function stockTotal(p, stockAmazon, vendues = 0) {
+export function stockTotal(p, stockAmazon, b = BILAN_VIDE) {
   const amazon = stockAmazon.quantite;
   const achetees = p.unites_achetees;
-  const transitEnregistre = p.unites_en_transit;
-  const total = achetees > 0 ? Math.max(amazon, achetees - vendues) : amazon + transitEnregistre;
-  const enTransit = Math.min(transitEnregistre, Math.max(0, total - amazon));
-  const aEnvoyer = Math.min(Math.max(0, total - amazon - enTransit), Math.max(0, achetees - p.unites_envoyees));
+  const sorties = b.initial + b.envois_apres_initial + b.restock_non_saisi + b.en_transit;
+  const aEnvoyer = Math.max(0, achetees - sorties);
   return {
     amazon,
-    en_transit: enTransit,
+    en_transit: b.en_transit,
     a_envoyer: aEnvoyer,
-    total: amazon + enTransit + aEnvoyer,
+    total: amazon + b.en_transit + aEnvoyer,
     achetees,
-    // Unités d'envois non confirmés déjà visibles chez Amazon : réception à confirmer dans l'envoi.
-    reception_a_confirmer: transitEnregistre - enTransit,
+    stock_initial: b.initial,
+    vendues: b.vendues,
+    restocks: b.envois_apres_initial + b.restock_non_saisi,
     incoherent: achetees > 0 && amazon > achetees,
   };
 }
 
-/** Ventes estimées cumulées par ASIN (baisses de stock entre imports d'inventaire). */
-function venduesParAsin(db) {
-  const m = new Map();
-  for (const v of ventesEstimees(db)) m.set(v.asin, (m.get(v.asin) || 0) + v.vendues);
-  return m;
-}
-
 export function listerAsins(db) {
   const stock = etatStock(db);
-  const vendues = venduesParAsin(db);
+  const bilan = bilanStock(db);
   const depenses = depensesFacturesParAsin(db);
   const dernierDossier = db.prepare('SELECT * FROM dossiers_autorisation WHERE asin = ? ORDER BY id DESC LIMIT 1');
   const nbEmails = db.prepare(
@@ -85,7 +79,7 @@ export function listerAsins(db) {
       return {
         ...p,
         stock: stockAmazon,
-        stock_total: stockTotal(p, stockAmazon, vendues.get(p.asin) || 0),
+        stock_total: stockTotal(p, stockAmazon, bilan.get(p.asin)),
         depenses_factures: depenses.get(p.asin) || DEPENSES_VIDES,
         autorisation: d ? { dossier_id: d.id, statut: d.statut, confirme: estConfirme(d), numero_cas: d.numero_cas } : null,
         nb_emails: nbEmails.get(p.asin, p.asin).n,
@@ -209,7 +203,7 @@ export function ficheAsin(db, asin) {
   return {
     ...produit,
     stock: etatStock(db).parAsin.get(asin) || STOCK_VIDE,
-    stock_total: stockTotal(produit, etatStock(db).parAsin.get(asin) || STOCK_VIDE, venduesParAsin(db).get(asin) || 0),
+    stock_total: stockTotal(produit, etatStock(db).parAsin.get(asin) || STOCK_VIDE, bilanStock(db).get(asin)),
     depenses_factures: depensesFacturesParAsin(db).get(asin) || DEPENSES_VIDES,
     historique_stock: historiqueStock,
     cout_retenu: coutRetenu(db, asin),

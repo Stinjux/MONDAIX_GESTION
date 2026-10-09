@@ -267,34 +267,6 @@ test('COGS : ventes estimées par la baisse du stock entre deux imports × coût
   assert.deepEqual(c.par_asin, [{ asin: 'B0AAAAAAA1', unites: 4, cout_unitaire: 4, montant: 16 }]);
 });
 
-test('stock total cohérent avec les factures : le stock Amazon fait partie des unités achetées, réimport sans effet', () => {
-  creerFacture(db, { numero_facture: 'F-1', total: 140, lignes: [{ asin: 'B0AAAAAAA1', quantite: 14, prix_unitaire_ht: 10 }] });
-  const fa = creerFacture(db, { numero_facture: 'F-2', total: 30, lignes: [{ asin: 'B0AAAAAAA1', quantite: 6, prix_unitaire_ht: 5 }] });
-  annulerFacture(db, fa.id, { date_annulation: '2026-10-01' }); // remboursée : ne compte pas
-  const total = () => listerAsins(db).find((x) => x.asin === 'B0AAAAAAA1').stock_total;
-  assert.deepEqual([total().a_envoyer, total().total], [14, 14], 'avant import : tout est chez vous');
-  // Envois non saisis : 14 achetées, 14 vues chez Amazon → 14 au total, pas 28
-  inv(db, 'asin,qty\nB0AAAAAAA1,14\n', 'inv-1');
-  assert.deepEqual(total(), { amazon: 14, en_transit: 0, a_envoyer: 0, total: 14, achetees: 14, reception_a_confirmer: 0, incoherent: false });
-  inv(db, 'asin,qty\nB0AAAAAAA1,14\n', 'inv-1');
-  assert.equal(total().total, 14, 'réimport du même fichier : stock inchangé');
-  // 4 ventes : Amazon passe à 10, le total aussi (les unités vendues ne reviennent pas « à envoyer »)
-  inv(db, 'asin,qty\nB0AAAAAAA1,10\n', 'inv-2');
-  assert.deepEqual([total().a_envoyer, total().total], [0, 10]);
-  assert.deepEqual(ficheAsin(db, 'B0AAAAAAA1').stock_total, total());
-  // Nouvel achat de 6 et envoi enregistré de 2 (en transit) : 4 restent à envoyer
-  creerFacture(db, { numero_facture: 'F-3', total: 60, lignes: [{ asin: 'B0AAAAAAA1', quantite: 6, prix_unitaire_ht: 10 }] });
-  creerEnvoi(db, { numero_envoi: 'FBA1', date_envoi: '2026-10-05', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 2 }] });
-  assert.deepEqual([total().amazon, total().en_transit, total().a_envoyer, total().total], [10, 2, 4, 16]);
-  const st = statistiques(db, '30j', new Date('2026-10-08T12:00:00Z')).indicateurs.stock_total;
-  assert.deepEqual(st, { total: 16, amazon: 10, en_transit: 2, a_envoyer: 4 });
-  // Amazon au-delà des achats (facture manquante) : signalé, « à envoyer » jamais négatif
-  inv(db, 'asin,qty\nB0AAAAAAA1,10\nB0AAAAAAA2,28\n', 'inv-3');
-  creerFacture(db, { numero_facture: 'F-4', total: 140, lignes: [{ asin: 'B0AAAAAAA2', quantite: 14, prix_unitaire_ht: 10 }] });
-  const b = listerAsins(db).find((x) => x.asin === 'B0AAAAAAA2').stock_total;
-  assert.deepEqual([b.amazon, b.a_envoyer, b.total, b.incoherent], [28, 0, 28, true]);
-});
-
 test('import d’inventaire supprimé par erreur : stock, coûts et coût retenu reviennent à l’état précédent', async () => {
   const { listerImportsInventaire, supprimerImportInventaire } = await import('../src/services/inventaire.js');
   const { coutRetenu, historiqueCouts } = await import('../src/services/couts.js');
@@ -320,25 +292,6 @@ test('import d’inventaire supprimé par erreur : stock, coûts et coût retenu
   assert.deepEqual(listerImportsInventaire(db).map((i) => [i.id, i.stock_initial]), [[r3.import_id, true]]);
 });
 
-test('envoi arrivé chez Amazon mais réception non confirmée : pas de double comptage avec l’import', () => {
-  creerFacture(db, { numero_facture: 'F', total: 140, lignes: [{ asin: 'B0AAAAAAA1', quantite: 14, prix_unitaire_ht: 10 }] });
-  creerEnvoi(db, { numero_envoi: 'FBA1', date_envoi: '2026-10-01', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 14 }] });
-  const total = () => listerAsins(db).find((x) => x.asin === 'B0AAAAAAA1').stock_total;
-  assert.deepEqual([total().amazon, total().en_transit, total().total], [0, 14, 14], 'avant import : en transit');
-  inv(db, 'asin,qty\nB0AAAAAAA1,14\n', 'inv-1');
-  assert.deepEqual([total().amazon, total().en_transit, total().a_envoyer, total().total], [14, 0, 0, 14], '14, pas 28');
-  assert.equal(total().reception_a_confirmer, 14);
-  assert.equal(total().incoherent, false);
-  inv(db, 'asin,qty\nB0AAAAAAA1,14\n', 'inv-1');
-  assert.equal(total().total, 14, 'nouvel import identique : inchangé');
-  // Arrivée partielle : 10 vues chez Amazon, 4 encore en transit
-  creerFacture(db, { numero_facture: 'F2', total: 100, lignes: [{ asin: 'B0AAAAAAA2', quantite: 10, prix_unitaire_ht: 10 }] });
-  creerEnvoi(db, { numero_envoi: 'FBA2', date_envoi: '2026-10-02', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA2', quantite: 10 }] });
-  inv(db, 'asin,qty\nB0AAAAAAA1,14\nB0AAAAAAA2,6\n', 'inv-2');
-  const b = listerAsins(db).find((x) => x.asin === 'B0AAAAAAA2').stock_total;
-  assert.deepEqual([b.amazon, b.en_transit, b.a_envoyer, b.total], [6, 4, 0, 10]);
-});
-
 test('import : une ligne répétée pour le même SKU ne double pas le stock ; SKU différents additionnés et signalés', () => {
   const r = importerInventaire(db, {
     texte: 'sku,asin,qty\nSKU-A,B0AAAAAAA1,14\nSKU-A,B0AAAAAAA1,14\nSKU-B,B0AAAAAAA2,3\nSKU-C,B0AAAAAAA2,2\n',
@@ -349,4 +302,76 @@ test('import : une ligne répétée pour le même SKU ne double pas le stock ; S
   assert.equal(etatStock(db).parAsin.get('B0AAAAAAA2').quantite, 5);
   assert.equal(r.doublons.length, 1);
   assert.deepEqual(r.asin_plusieurs_lignes, [{ asin: 'B0AAAAAAA1', lignes: 2 }, { asin: 'B0AAAAAAA2', lignes: 2 }]);
+});
+
+/** Import d'inventaire daté (chaque import est une photo complète du stock Amazon). */
+function invDate(texte, nom, d) {
+  const r = importerInventaire(db, { texte, mapping: { asin: 0, quantite: 1 }, nom });
+  db.prepare('UPDATE imports SET created_at = ? WHERE id = ?').run(`${d} 10:00:00`, r.import_id);
+  return r;
+}
+
+test('stock : seule la variation entre deux imports compte (10→10 = 10, 10→8 = −2 ventes, hausse = restock)', () => {
+  creerFacture(db, { numero_facture: 'F-1', total: 200, lignes: [{ asin: 'B0AAAAAAA1', quantite: 20, prix_unitaire_ht: 10 }] });
+  const t = () => listerAsins(db).find((x) => x.asin === 'B0AAAAAAA1').stock_total;
+  const resume = () => [t().amazon, t().en_transit, t().a_envoyer, t().total];
+  assert.deepEqual(resume(), [0, 0, 20, 20], 'avant tout import : tout est chez vous');
+
+  invDate('asin,qty\nB0AAAAAAA1,10\n', 'initial', '2026-09-01');
+  assert.deepEqual(resume(), [10, 0, 10, 20], 'stock initial : 10 chez Amazon, 10 encore chez vous');
+  assert.equal(t().stock_initial, 10);
+
+  invDate('asin,qty\nB0AAAAAAA1,10\n', 'meme', '2026-09-05');
+  assert.deepEqual(resume(), [10, 0, 10, 20], '10 → 10 : 10, pas 20');
+
+  invDate('asin,qty\nB0AAAAAAA1,8\n', 'ventes', '2026-09-10');
+  assert.deepEqual(resume(), [8, 0, 10, 18], '10 → 8 : 2 ventes');
+  assert.equal(t().vendues, 2);
+  assert.equal(ficheAsin(db, 'B0AAAAAAA1').historique_stock[0].ecart, -2);
+
+  invDate('asin,qty\nB0AAAAAAA1,13\n', 'restock', '2026-09-15');
+  assert.deepEqual(resume(), [13, 0, 5, 18], '8 → 13 sans envoi saisi : restock de 5, pris sur les unités chez vous');
+  assert.equal(ficheAsin(db, 'B0AAAAAAA1').historique_stock[0].restock_non_saisi, 5);
+
+  creerEnvoi(db, { numero_envoi: 'FBA1', date_envoi: '2026-09-20', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 3 }] });
+  assert.deepEqual(resume(), [13, 3, 2, 18], 'envoi saisi après le dernier import : en transit');
+
+  invDate('asin,qty\nB0AAAAAAA1,16\n', 'arrivee', '2026-09-25');
+  assert.deepEqual(resume(), [16, 0, 2, 18], '13 → 16 : l’envoi de 3 est arrivé, pas de doublon');
+  const h = ficheAsin(db, 'B0AAAAAAA1').historique_stock[0];
+  assert.deepEqual([h.ecart, h.envois, h.vendues, h.restock_non_saisi], [3, 3, 0, 0]);
+  assert.deepEqual(ficheAsin(db, 'B0AAAAAAA1').stock_total, t());
+  assert.deepEqual(statistiques(db, '365j', new Date('2026-10-08T12:00:00Z')).indicateurs.stock_total, { total: 18, amazon: 16, en_transit: 0, a_envoyer: 2 });
+});
+
+test('stock : envoi saisi avant le stock initial déjà compris dedans ; Amazon au-delà des achats signalé', () => {
+  creerFacture(db, { numero_facture: 'F', total: 140, lignes: [{ asin: 'B0AAAAAAA1', quantite: 14, prix_unitaire_ht: 10 }] });
+  creerEnvoi(db, { numero_envoi: 'FBA1', date_envoi: '2026-09-01', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 14 }] });
+  invDate('asin,qty\nB0AAAAAAA1,14\n', 'initial', '2026-09-03');
+  const a = listerAsins(db).find((x) => x.asin === 'B0AAAAAAA1').stock_total;
+  assert.deepEqual([a.amazon, a.en_transit, a.a_envoyer, a.total, a.incoherent], [14, 0, 0, 14, false], '14, pas 28');
+  creerFacture(db, { numero_facture: 'F2', total: 140, lignes: [{ asin: 'B0AAAAAAA2', quantite: 14, prix_unitaire_ht: 10 }] });
+  invDate('asin,qty\nB0AAAAAAA1,14\nB0AAAAAAA2,28\n', 'trop', '2026-09-04');
+  const b = listerAsins(db).find((x) => x.asin === 'B0AAAAAAA2').stock_total;
+  assert.deepEqual([b.amazon, b.a_envoyer, b.total, b.incoherent], [28, 0, 28, true]);
+});
+
+test('remise à zéro de l’inventaire : imports supprimés, factures et envois conservés, une seule fois au démarrage', async () => {
+  const { reinitialiserInventaire, migrerReinitialisationInventaire, listerImportsInventaire } = await import('../src/services/inventaire.js');
+  const { coutRetenu } = await import('../src/services/couts.js');
+  creerFacture(db, { numero_facture: 'F-1', total: 200, lignes: [{ asin: 'B0AAAAAAA1', quantite: 20, prix_unitaire_ht: 10 }] });
+  creerEnvoi(db, { numero_envoi: 'FBA1', date_envoi: '2026-09-02', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 5 }] });
+  importerInventaire(db, { texte: 'asin,qty,cost\nB0AAAAAAA1,40,99\nB0AAAAAAA9,3,7\n', mapping: { asin: 0, quantite: 1, cost: 2 }, nom: 'faux' });
+  importerInventaire(db, { texte: 'asin,qty\nB0AAAAAAA1,40\n', mapping: { asin: 0, quantite: 1 }, nom: 'faux-2' });
+  assert.deepEqual(migrerReinitialisationInventaire(db), { imports_supprimes: 2 });
+  assert.equal(migrerReinitialisationInventaire(db), null, 'une seule fois');
+  assert.equal(listerImportsInventaire(db).length, 0);
+  assert.equal(etatStock(db).dernier, null);
+  assert.equal(coutRetenu(db, 'B0AAAAAAA1').montant_unitaire_ht, 10, 'coût de la facture conservé et retenu');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM factures').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM envois').get().n, 1);
+  const t = listerAsins(db).find((x) => x.asin === 'B0AAAAAAA1').stock_total;
+  assert.deepEqual([t.amazon, t.en_transit, t.a_envoyer, t.total], [0, 5, 15, 20], 'repart des factures : 20 achetées');
+  assert.ok(db.prepare("SELECT COUNT(*) n FROM journal WHERE action = 'reinitialisation'").get().n >= 3, 'contenu supprimé gardé au journal');
+  assert.deepEqual(reinitialiserInventaire(db), { imports_supprimes: 0 });
 });

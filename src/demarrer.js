@@ -6,7 +6,7 @@ import { estLocal } from './lib/acces.js';
 import { creerServeur } from './server.js';
 import { planifierSynchro } from './services/synchroEmail.js';
 import { migrerGmailVersAsin, migrerLiensEmails, migrerNeoVersAsin } from './services/emails.js';
-import { migrerRelevesStock } from './services/inventaire.js';
+import { migrerReinitialisationInventaire, migrerRelevesStock } from './services/inventaire.js';
 import { migrerReferencesFactures } from './services/documentsFactures.js';
 
 /**
@@ -53,6 +53,8 @@ export function demarrer() {
   migrerNeoVersAsin(db);
   migrerGmailVersAsin(db);
   migrerRelevesStock(db);
+  const reinit = migrerReinitialisationInventaire(db);
+  if (reinit) console.log(`Inventaire remis à zéro : ${reinit.imports_supprimes} import(s) supprimé(s) (factures conservées).`);
   migrerReferencesFactures(db);
   const serveur = creerServeur(db, { acces: { utilisateur: process.env.MONDAIX_UTILISATEUR || 'admin', motDePasse } });
   // Sous Passenger, l'appel à listen() est intercepté : le port et l'hôte sont alors ignorés.

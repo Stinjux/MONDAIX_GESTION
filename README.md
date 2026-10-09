@@ -91,15 +91,17 @@ Alternative cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.
 
 ### Stock
 
-- Chaque import du fichier d’inventaire Amazon **remplace** le stock chez Amazon (réimporter le même fichier ne change rien).
+- Chaque import du fichier d’inventaire Amazon est une **photo complète** qui remplace la précédente ; seule la
+  **variation** avec l’import précédent compte : 10 → 10 = 10 (inchangé) ; 10 → 8 = 2 ventes (−2) ;
+  10 → 15 = restock de 5 (envoi arrivé chez Amazon). Un envoi enregistré expédié entre deux imports explique une hausse ;
+  une hausse sans envoi enregistré est un « restock non saisi ».
 - Le **premier import est le stock initial** : aucune vente n’est comptée avant lui.
-- Un import fait par erreur se **supprime** (page Stocks, « Imports d’inventaire Amazon ») : le stock redevient celui de
-  l’import précédent et les coûts ajoutés par cet import sont retirés (le coût précédent est repris s’il était retenu).
-- **Stock total** d’un ASIN : chaque unité vient d’une facture et n’est comptée qu’une fois. Total = unités achetées
-  (factures non annulées) − ventes estimées, jamais moins que le stock vu chez Amazon ; réparti entre **chez Amazon**,
-  **en transit** (envois non confirmés, sans dépasser ce qui n’est pas déjà chez Amazon — un envoi arrivé mais non
-  confirmé n’est pas compté deux fois, il est signalé « réception à confirmer ») et **à envoyer** (chez vous).
+- **Stock total** = chez Amazon (dernier import) + en transit (envois expédiés depuis le dernier import)
+  + à envoyer (unités des factures non annulées − stock initial − restocks − en transit ; jamais négatif).
+  Chaque unité n’est comptée qu’une fois.
 - Si le stock chez Amazon dépasse les unités achetées, l’ASIN est signalé « Amazon > acheté » (facture manquante).
+- Un import fait par erreur se **supprime** (page Stocks, « Imports d’inventaire Amazon ») ; « Réinitialiser
+  l’inventaire » supprime tous les imports (factures, envois et dépenses conservés). Le contenu supprimé reste au Journal.
 - Les états En stock / Stock bas / Rupture et Actif / Inactif suivent le stock total.
 
 ### 4. Envois Amazon et réception

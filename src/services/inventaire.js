@@ -117,7 +117,7 @@ export function listerImportsInventaire(db) {
  * Si un de ces coûts était le coût retenu d'un ASIN, le coût précédent de l'historique est retenu.
  * Le stock redevient celui de l'import précédent ; l'opération est journalisée.
  */
-export function supprimerImportInventaire(db, id) {
+export function supprimerImportInventaire(db, id, { motif = 'suppression' } = {}) {
   const imp = db.prepare("SELECT * FROM imports WHERE id = ? AND type = 'inventaire'").get(id);
   if (!imp) throw new ErreurMetier('Import introuvable.', 404);
   return transaction(db, () => {
@@ -143,9 +143,32 @@ export function supprimerImportInventaire(db, id) {
         .get(asin);
       db.prepare("UPDATE produits SET quantite_inventaire = ?, updated_at = datetime('now') WHERE asin = ?").run(r?.quantite ?? null, asin);
     }
-    journaliser(db, 'import', id, 'suppression', { nom: imp.nom, date: imp.created_at, asin: releves.length, couts: couts.length });
+    // Le contenu supprimé reste lisible dans le journal (quantités et coûts de l'import).
+    journaliser(db, 'import', id, motif, { nom: imp.nom, date: imp.created_at, releves, couts });
     return { asin: releves.length, couts: couts.length };
   });
+}
+
+/**
+ * Remet l'inventaire à zéro : supprime tous les imports d'inventaire (photos du stock Amazon et coûts
+ * qu'ils ont ajoutés). Les factures, envois, dépenses et coûts des factures ne sont pas touchés.
+ * Le prochain import devient le stock initial.
+ */
+export function reinitialiserInventaire(db) {
+  return transaction(db, () => {
+    const ids = db.prepare("SELECT id FROM imports WHERE type = 'inventaire' ORDER BY id DESC").all().map((r) => r.id);
+    for (const id of ids) supprimerImportInventaire(db, id, { motif: 'reinitialisation' });
+    journaliser(db, 'inventaire', null, 'reinitialisation', { imports_supprimes: ids.length });
+    return { imports_supprimes: ids.length };
+  });
+}
+
+/** Remise à zéro demandée le 9 octobre 2026 : exécutée une seule fois au démarrage. */
+export function migrerReinitialisationInventaire(db) {
+  if (lireParametre(db, 'migration.reinit_inventaire_20261009') === '1') return null;
+  const r = reinitialiserInventaire(db);
+  db.prepare("INSERT INTO parametres (cle, valeur) VALUES ('migration.reinit_inventaire_20261009', '1') ON CONFLICT(cle) DO UPDATE SET valeur = '1'").run();
+  return r;
 }
 
 /* ------------------------------------------------------------------ stock */
@@ -180,45 +203,122 @@ export function etatStock(db) {
   return { dernier, precedent: precedent || null, parAsin };
 }
 
+const jour = (d) => String(d).slice(0, 10);
+
+/** Envois expédiés à Amazon (hors « en préparation ») : une ligne par ASIN et par jour d'expédition. */
+function envoisExpedies(db) {
+  return db
+    .prepare(
+      `SELECT el.asin, COALESCE(e.date_envoi, date(e.created_at)) AS date, SUM(el.quantite) AS unites
+       FROM envoi_lignes el JOIN envois e ON e.id = el.envoi_id
+       WHERE e.statut <> 'en_preparation' GROUP BY el.asin, date`,
+    )
+    .all();
+}
+
 /**
- * Unités vendues estimées entre deux imports d'inventaire consécutifs (stock Amazon) :
- * stock précédent + unités expédiées à Amazon entre les deux imports − stock actuel (jamais négatif).
- * Les ventes sont datées du jour de l'import qui les constate. Un ASIN absent d'un import compte pour 0.
+ * Mouvements du stock Amazon, d'un import d'inventaire au suivant. Chaque import est une photo complète :
+ * seule la variation compte (10 → 10 : rien ; 10 → 8 : 2 ventes ; 10 → 15 : restock de 5).
+ * Les envois enregistrés expédiés entre deux imports (le jour d'un import compte pour l'intervalle
+ * suivant) expliquent une hausse ; une hausse sans envoi enregistré est un restock non saisi.
+ *   ventes  = avant + envois enregistrés − après (si positif)
+ *   restock non saisi = après − avant − envois enregistrés (si positif)
+ * Le premier import est le stock initial : aucune vente avant lui.
  */
-export function ventesEstimees(db) {
+export function mouvementsStock(db) {
   const imports = importsStock(db).reverse();
   const qte = db.prepare('SELECT asin, quantite FROM stock_releves WHERE import_id = ?');
-  const envoyees = db.prepare(
-    `SELECT el.asin, SUM(el.quantite) AS unites FROM envoi_lignes el JOIN envois e ON e.id = el.envoi_id
-     WHERE e.statut <> 'en_preparation' AND COALESCE(e.date_envoi, date(e.created_at)) > ? AND COALESCE(e.date_envoi, date(e.created_at)) <= ?
-     GROUP BY el.asin`,
-  );
-  const ventes = [];
+  const envois = envoisExpedies(db);
+  const mouvements = [];
   for (let i = 1; i < imports.length; i++) {
     const avant = imports[i - 1];
     const apres = imports[i];
-    const du = String(avant.date).slice(0, 10);
-    const au = String(apres.date).slice(0, 10);
+    const du = jour(avant.date);
+    const au = jour(apres.date);
     const qAvant = new Map(qte.all(avant.import_id).map((r) => [r.asin, r.quantite]));
     const qApres = new Map(qte.all(apres.import_id).map((r) => [r.asin, r.quantite]));
-    const entrees = new Map(envoyees.all(du, au).map((r) => [r.asin, r.unites]));
+    const entrees = new Map();
+    for (const e of envois) if (e.date >= du && e.date < au) entrees.set(e.asin, (entrees.get(e.asin) || 0) + e.unites);
     for (const asin of new Set([...qAvant.keys(), ...qApres.keys(), ...entrees.keys()])) {
-      const vendues = (qAvant.get(asin) ?? 0) + (entrees.get(asin) ?? 0) - (qApres.get(asin) ?? 0);
-      if (vendues > 0) ventes.push({ asin, date: au, vendues, import_id: apres.import_id });
+      const a = qAvant.get(asin) ?? 0;
+      const b = qApres.get(asin) ?? 0;
+      const env = entrees.get(asin) ?? 0;
+      mouvements.push({
+        asin,
+        date: au,
+        import_id: apres.import_id,
+        avant: a,
+        apres: b,
+        variation: b - a,
+        envois: env,
+        vendues: Math.max(0, a + env - b),
+        restock_non_saisi: Math.max(0, b - a - env),
+      });
     }
   }
-  return ventes;
+  return mouvements;
+}
+
+/** Ventes estimées (baisses du stock Amazon entre deux imports, envois enregistrés pris en compte). */
+export function ventesEstimees(db) {
+  return mouvementsStock(db)
+    .filter((m) => m.vendues > 0)
+    .map((m) => ({ asin: m.asin, date: m.date, vendues: m.vendues, import_id: m.import_id }));
+}
+
+/**
+ * Bilan par ASIN des unités sorties de chez vous vers Amazon :
+ *   stock initial (premier import) + envois enregistrés après lui + restocks non saisis ;
+ *   en transit = envois expédiés depuis le dernier import (pas encore visibles chez Amazon).
+ * Sans import : tous les envois expédiés sont en transit.
+ */
+export function bilanStock(db) {
+  const imports = importsStock(db).reverse();
+  const bilan = new Map();
+  const get = (asin) => {
+    if (!bilan.has(asin)) bilan.set(asin, { initial: 0, envois_apres_initial: 0, restock_non_saisi: 0, vendues: 0, en_transit: 0 });
+    return bilan.get(asin);
+  };
+  if (imports.length) {
+    for (const r of db.prepare('SELECT asin, quantite FROM stock_releves WHERE import_id = ?').all(imports[0].import_id)) get(r.asin).initial = r.quantite;
+  }
+  const debut = imports.length ? jour(imports[0].date) : null;
+  const fin = imports.length ? jour(imports[imports.length - 1].date) : null;
+  for (const e of envoisExpedies(db)) {
+    if (fin === null || e.date >= fin) get(e.asin).en_transit += e.unites;
+    else if (e.date >= debut) get(e.asin).envois_apres_initial += e.unites;
+    // Envoi antérieur au premier import : déjà compris dans le stock initial.
+  }
+  for (const m of mouvementsStock(db)) {
+    const b = get(m.asin);
+    b.vendues += m.vendues;
+    b.restock_non_saisi += m.restock_non_saisi;
+  }
+  return bilan;
 }
 
 /** Évolution du stock d'un ASIN, import par import. */
 export function historiqueStockAsin(db, asin) {
   const imports = importsStock(db).reverse();
+  const mouvements = new Map(mouvementsStock(db).filter((m) => m.asin === asin).map((m) => [m.import_id, m]));
   const lignes = [];
   let precedente = null;
-  for (const i of imports) {
+  for (const [n, i] of imports.entries()) {
     const r = db.prepare('SELECT quantite FROM stock_releves WHERE import_id = ? AND asin = ?').get(i.import_id, asin);
     const q = r ? r.quantite : 0;
-    lignes.push({ import_id: i.import_id, nom: i.nom, date: i.date, quantite: q, absent: !r, ecart: precedente === null ? null : q - precedente });
+    const m = mouvements.get(i.import_id);
+    lignes.push({
+      import_id: i.import_id,
+      nom: i.nom,
+      date: i.date,
+      quantite: q,
+      absent: !r,
+      ecart: precedente === null ? null : q - precedente,
+      stock_initial: n === 0,
+      vendues: m?.vendues ?? 0,
+      envois: m?.envois ?? 0,
+      restock_non_saisi: m?.restock_non_saisi ?? 0,
+    });
     precedente = q;
   }
   return lignes.reverse();

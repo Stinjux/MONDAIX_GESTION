@@ -116,8 +116,7 @@ export async function pageAsins(zone) {
           <td>${etatStock(total(p), seuil).badge}<span class="aide sous">${estActif(p) ? 'actif' : 'inactif'}</span></td>
           <td class="num" data-tri="${p.stock.quantite}">${celluleStock(p.stock)}${p.stock_total.incoherent
             ? `<span class="sous" title="Chez Amazon (${p.stock_total.amazon}) dépasse les unités achetées sur vos factures (${p.stock_total.achetees}) : une facture manque probablement.">${badge('> acheté', 'alerte')}</span>` : ''}</td>
-          <td class="num">${p.stock_total.en_transit}${p.stock_total.reception_a_confirmer
-            ? `<a class="sous" href="#/envois?filtre=a_verifier" title="${p.stock_total.reception_a_confirmer} unité(s) d’envois non confirmés sont déjà chez Amazon : confirmez la réception de l’envoi.">${badge('réception à confirmer', 'info')}</a>` : ''}</td>
+          <td class="num">${p.stock_total.en_transit}</td>
           <td class="num">${p.stock_total.a_envoyer}</td>
           <td class="num">${montant(p.cout_retenu)}${asinsEcart.has(p.asin) ? '<br>' + badge('écart', 'alerte') : ''}</td>
           <td class="num">${p.unites_achetees}</td>
@@ -129,12 +128,14 @@ export async function pageAsins(zone) {
       q || filtre ? 'Aucun ASIN ne correspond à ces critères.' : 'Aucun ASIN : importez votre fichier d’inventaire ou déposez une facture.',
       { videAction: q || filtre ? { libelle: 'Voir tous les ASIN', href: '#/asins' } : { libelle: 'Déposer une facture', href: '#/factures' } },
     )}
-    <p class="aide">Chaque unité vient d’une facture et n’est comptée qu’une fois : stock total = achetées − vendues (estimées), réparti entre chez Amazon (dernier import, qui remplace le précédent),
-      en transit (envois non confirmés pas encore visibles chez Amazon) et à envoyer (chez vous). « Amazon > acheté » signale une facture probablement manquante.</p>
+    <p class="aide">Chaque import est une photo complète du stock Amazon : seule la variation avec l’import précédent compte (10 → 10 : inchangé ; 10 → 8 : 2 ventes ; 10 → 15 : restock de 5).
+      Stock total = chez Amazon + en transit (envois expédiés depuis le dernier import) + à envoyer (unités de vos factures pas encore parties : achetées − stock initial − restocks − en transit).
+      « Amazon > acheté » signale une facture probablement manquante.</p>
     <details class="carte" id="bloc-import" ${importEnCours() ? 'open' : ''}><summary><strong>Importer le fichier d’inventaire</strong> (colonne cost = coût d’achat unitaire HT)</summary>
       <div id="inventaire" class="pile">${rendreInventaire()}</div></details>
 
-    <h2>Imports d’inventaire Amazon (${imports.length})</h2>
+    <div class="section-titre"><h2>Imports d’inventaire Amazon (${imports.length})</h2>
+      ${imports.length ? `<button type="button" class="danger" id="reinitialiser-inventaire">${icone('trash-2')}Réinitialiser l’inventaire</button>` : ''}</div>
     <p class="aide">Chaque import remplace le stock chez Amazon. Le premier import est votre stock initial : aucune vente n’est comptée avant lui.
       Supprimez un import fait par erreur : le stock redevient celui de l’import précédent et les coûts ajoutés par cet import sont retirés.</p>
     ${tableau(
@@ -164,6 +165,15 @@ export async function pageAsins(zone) {
     ecrireSeuil(v);
     rafraichir();
   };
+  zone.querySelector('#reinitialiser-inventaire')?.addEventListener('click', async () => {
+    const ok = await confirmer({
+      titre: 'Réinitialiser l’inventaire ?',
+      message: `Les ${imports.length} import(s) d’inventaire sont supprimés (stock chez Amazon et coûts ajoutés par ces imports).
+        Vos factures, envois et dépenses ne sont pas touchés. Le prochain import deviendra votre stock initial.`,
+      libelle: 'Réinitialiser',
+    });
+    if (ok && (await tenter(() => post('/api/imports/inventaire/reinitialiser'), 'Inventaire remis à zéro.')) !== undefined) rafraichir();
+  });
   zone.querySelectorAll('[data-suppr-import]').forEach((b) => {
     b.onclick = async () => {
       const i = imports.find((x) => String(x.id) === b.dataset.supprImport);
@@ -187,10 +197,21 @@ export async function pageAsins(zone) {
   brancherInventaire(zone);
 }
 
-function ecartTexte(ecart) {
+function ecartTexte(ecart, { sens = false } = {}) {
   if (ecart === null || ecart === undefined) return '';
   if (ecart === 0) return '= 0';
-  return `${icone(ecart > 0 ? 'arrow-up' : 'arrow-down', 14)}${ecart > 0 ? '+' : '−'}${Math.abs(ecart)}`;
+  const quoi = sens ? (ecart > 0 ? ' restock' : ' vendu(s)') : '';
+  return `${icone(ecart > 0 ? 'arrow-up' : 'arrow-down', 14)}${ecart > 0 ? '+' : '−'}${Math.abs(ecart)}${quoi}`;
+}
+
+/** Interprétation d'un import : stock initial, ventes, envoi enregistré ou restock non saisi. */
+function mouvement(h) {
+  if (h.stock_initial) return badge('Stock initial', 'info');
+  const parts = [];
+  if (h.vendues) parts.push(`${h.vendues} vendu(s)`);
+  if (h.envois) parts.push(`${h.envois} reçu(s) d’envois enregistrés`);
+  if (h.restock_non_saisi) parts.push(`restock de ${h.restock_non_saisi} (envoi non saisi)`);
+  return parts.length ? esc(parts.join(' · ')) : '<span class="aide">inchangé</span>';
 }
 
 function celluleDepense(d) {
@@ -199,7 +220,7 @@ function celluleDepense(d) {
 }
 
 function celluleStock(s) {
-  return `<strong>${s.quantite}</strong>${s.ecart !== null && s.ecart !== 0 ? `<span class="variation">${ecartTexte(s.ecart)}</span>` : ''}`;
+  return `<strong>${s.quantite}</strong>${s.ecart !== null && s.ecart !== 0 ? `<span class="variation">${ecartTexte(s.ecart, { sens: true })}</span>` : ''}`;
 }
 
 /* ------------------------------------------------------------------ fiche */
@@ -239,16 +260,14 @@ export async function pageAsin(zone, asin) {
     <div class="grille grille-4">
       ${tuile(p.stock_total.total, 'Stock total (Amazon + en transit + à envoyer)')}
       ${tuile(`${p.stock.quantite}${p.stock.ecart ? ` <span class="variation">${ecartTexte(p.stock.ecart)}</span>` : ''}`, 'Chez Amazon (dernier import)')}
-      ${tuile(p.stock_total.en_transit, `En transit vers Amazon (${p.unites_recues_amazon} reçue(s) au total)`)}
-      ${tuile(p.stock_total.a_envoyer, `À envoyer (sur ${p.unites_achetees} achetée(s), hors Amazon, transit et ventes)`)}
+      ${tuile(p.stock_total.en_transit, 'En transit (envois expédiés depuis le dernier import)')}
+      ${tuile(p.stock_total.a_envoyer, `À envoyer : ${p.unites_achetees} achetée(s) − ${p.stock_total.stock_initial} stock initial − ${p.stock_total.restocks} restock(s) − ${p.stock_total.en_transit} en transit`)}
       ${tuile(montant(cc.par_unite.achat), 'Coût d’achat HT retenu / unité')}
       ${tuile(montant(df.cout_moyen_unite), `Coût moyen facturé / unité (${df.unites} u.)`)}
       ${tuile(montant(cc.cout_complet_unitaire), 'Coût complet / unité')}
       ${tuile(montant(df.montant), `Dépense totale (${df.nb_factures} facture(s))`)}
     </div>
 
-    ${p.stock_total.reception_a_confirmer ? `<div class="message info">${p.stock_total.reception_a_confirmer} unité(s) d’envois non confirmés sont déjà comptées chez Amazon (elles ne sont pas comptées deux fois).
-      <a href="#/envois?filtre=a_verifier">Confirmez la réception de l’envoi</a> pour mettre le suivi à jour.</div>` : ''}
     ${p.stock_total.incoherent ? `<div class="message alerte">Chez Amazon (${p.stock_total.amazon} unités) dépasse les unités achetées sur vos factures (${p.stock_total.achetees}).
       Le stock chez Amazon ne peut pas dépasser ce qui a été acheté : une facture manque probablement pour cet ASIN.</div>` : ''}
     <div class="deux-colonnes">
@@ -280,9 +299,10 @@ export async function pageAsin(zone, asin) {
     )}
 
     ${p.historique_stock.length ? `<h2>Stock (imports du fichier d’inventaire)</h2>
-    ${tableau(['Import', 'Date', { t: 'Quantité', classe: 'num' }, { t: 'Écart avec l’import précédent', classe: 'num' }],
-      p.historique_stock.map((h, i) => `<tr><td>${esc(h.nom || '#' + h.import_id)}${i === p.historique_stock.length - 1 ? ' ' + badge('Stock initial', 'info') : ''}</td><td>${date(h.date)}</td>
-        <td class="num">${h.quantite}</td><td class="num">${ecartTexte(h.ecart) || '—'}</td></tr>`))}` : ''}
+    <p class="aide">${p.stock_total.vendues} unité(s) vendue(s) depuis le stock initial (baisses entre imports).</p>
+    ${tableau(['Import', 'Date', { t: 'Chez Amazon', classe: 'num' }, { t: 'Variation', classe: 'num' }, 'Mouvement'],
+      p.historique_stock.map((h) => `<tr><td>${esc(h.nom || '#' + h.import_id)}</td><td>${date(h.date)}</td>
+        <td class="num">${h.quantite}</td><td class="num">${ecartTexte(h.ecart) || '—'}</td><td>${mouvement(h)}</td></tr>`))}` : ''}
 
     <h2>Coûts d’achat unitaires HT</h2>
     <p class="aide">Aucune valeur n’est écrasée. Choisissez la valeur à retenir en cas d’écart.</p>
