@@ -1,4 +1,6 @@
-import { esc, references, definirDomaineAmazon } from './outils.js';
+import { references, definirDomaineAmazon, squelette, vueErreur } from './outils.js';
+import { enrichirMenus } from './menus.js';
+import { ameliorerTableaux } from './tableaux.js';
 import { pageTableauDeBord } from './pages/tableau.js';
 import { pageDepenses } from './pages/produits.js';
 import { pageAsins, pageAsin } from './pages/asins.js';
@@ -27,7 +29,7 @@ const ROUTES = [
   [/^journal$/, pageJournal],
 ];
 
-export async function afficher() {
+export async function afficher({ chargement = true } = {}) {
   const chemin = location.hash.replace(/^#\/?/, '').split('?')[0];
   const zone = document.getElementById('contenu');
   for (const a of document.querySelectorAll('#nav a')) {
@@ -41,20 +43,38 @@ export async function afficher() {
   for (const [re, page] of ROUTES) {
     const m = chemin.match(re);
     if (!m) continue;
+    // Chargement : squelette si la page tarde (pas lors d'un simple rafraîchissement).
+    const minuteur = chargement ? setTimeout(() => (zone.innerHTML = squelette()), 120) : null;
     try {
       await page(zone, ...m.slice(1));
     } catch (e) {
-      zone.innerHTML = `<div class="message erreur">${esc(e.message)}</div>`;
+      zone.innerHTML = vueErreur(e.message);
+      zone.querySelector('[data-reessayer]').onclick = () => afficher();
+    } finally {
+      clearTimeout(minuteur);
     }
     return;
   }
-  zone.innerHTML = '<div class="message erreur">Page introuvable.</div>';
+  zone.innerHTML = vueErreur('Page introuvable.');
+  zone.querySelector('[data-reessayer]').onclick = () => (location.hash = '#/');
 }
 
 /** Recharge la page courante (après une action). */
-export const rafraichir = () => afficher();
+export const rafraichir = () => afficher({ chargement: false });
 
-window.addEventListener('hashchange', afficher);
+// Menus déroulants et tableaux enrichis partout (pages, modales), après chaque rendu.
+let enAttente = false;
+new MutationObserver(() => {
+  if (enAttente) return;
+  enAttente = true;
+  queueMicrotask(() => {
+    enAttente = false;
+    enrichirMenus(document);
+    ameliorerTableaux(document);
+  });
+}).observe(document.body, { childList: true, subtree: true });
+
+window.addEventListener('hashchange', () => afficher());
 document.getElementById('menu-mobile').onclick = () => document.getElementById('nav').classList.toggle('ouvert');
 references()
   .then((r) => definirDomaineAmazon(r.amazon_domaine))

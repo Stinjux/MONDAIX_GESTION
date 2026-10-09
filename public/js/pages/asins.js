@@ -1,4 +1,4 @@
-import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, tenter, references, asinLien, urlAmazon } from '../outils.js';
+import { api, post, put, suppr, confirmer, informer, esc, montant, date, badge, tableau, modale, champ, tenter, references, asinLien, urlAmazon } from '../outils.js';
 import { rafraichir } from '../app.js';
 import { rendreInventaire, brancherInventaire } from './produits.js';
 
@@ -266,7 +266,7 @@ export async function pageAsin(zone, asin) {
   zone.querySelector('#lier-facture').onclick = () => lierFacture(asin, p);
   zone.querySelectorAll('[data-retirer-ligne]').forEach((b) => {
     b.onclick = async () => {
-      if (!confirm('Retirer cet article de la facture ? La facture et l’historique des coûts sont conservés.')) return;
+      if (!(await confirmer({ titre: 'Retirer cet article ?', message: 'L’article est retiré de la facture. La facture et l’historique des coûts sont conservés.', libelle: 'Retirer' }))) return;
       if ((await tenter(() => suppr(`/api/facture-lignes/${b.dataset.retirerLigne}`), 'Article retiré.')) !== undefined) rafraichir();
     };
   });
@@ -293,7 +293,7 @@ export async function pageAsin(zone, asin) {
 async function lierFacture(asin, p) {
   const factures = await api('/api/factures');
   if (!factures.length) {
-    alert('Aucune facture enregistrée. Déposez d’abord une facture dans Factures.');
+    await informer('Aucune facture', 'Aucune facture enregistrée. Déposez d’abord une facture dans Factures.');
     return;
   }
   const deja = new Set(p.factures.map((f) => f.id));

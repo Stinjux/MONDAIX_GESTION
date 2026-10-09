@@ -1,4 +1,4 @@
-import { api, post, put, suppr, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, toast, references, asinLien } from '../outils.js';
+import { api, post, put, suppr, confirmer, esc, montant, date, badge, tableau, modale, champ, selecteur, tenter, toast, references, asinLien } from '../outils.js';
 import { rafraichir } from '../app.js';
 
 export const TONS_SUIVI = { en_preparation: '', en_transit: 'info', partiel: 'alerte', recu: 'ok', ecart: 'erreur' };
@@ -210,7 +210,7 @@ export async function pageEnvoi(zone, id) {
     if (r) rafraichir();
   });
   zone.querySelector('#tout-recu')?.addEventListener('click', async () => {
-    if (!confirm('Amazon a reçu toutes les unités envoyées ? Les quantités reçues seront égales aux quantités envoyées.')) return;
+    if (!(await confirmer({ titre: 'Tout est arrivé ?', message: 'Amazon a reçu toutes les unités envoyées : les quantités reçues seront égales aux quantités envoyées.', libelle: 'Confirmer la réception', danger: false }))) return;
     const r = await tenter(() => post(`/api/envois/${e.id}/tout-recu`, { date_reception: zone.querySelector('#date-reception')?.value || undefined }), 'Envoi reçu en entier par Amazon.');
     if (r) rafraichir();
   });

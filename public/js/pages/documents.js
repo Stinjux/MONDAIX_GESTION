@@ -1,4 +1,4 @@
-import { api, post, suppr, esc, montant, date, badge, toast, tenter, modale } from '../outils.js';
+import { api, post, suppr, confirmer, esc, montant, date, badge, toast, tenter, modale } from '../outils.js';
 import { rafraichir } from '../app.js';
 
 const TYPES = 'application/pdf,image/jpeg,image/png,image/webp,image/gif';
@@ -162,7 +162,7 @@ export async function pageDocument(zone, id) {
       asin: tr.querySelector('[name=asin]').value.trim(),
     }));
     const sansAsin = articles.filter((a) => !a.asin && (a.description || a.quantite)).length;
-    if (sansAsin && !confirm(`${sansAsin} article(s) sans ASIN ne seront pas enregistrés. Continuer ?`)) return;
+    if (sansAsin && !(await confirmer({ titre: 'Articles sans ASIN', message: `${sansAsin} article(s) sans ASIN ne seront pas enregistrés. Continuer ?`, libelle: 'Enregistrer quand même', danger: false }))) return;
     const bouton = form.querySelector('#enregistrer');
     bouton.disabled = true;
     const r = await tenter(() => post(`/api/factures/documents/${d.id}/valider`, { ...donnees, lignes: articles.filter((a) => a.asin) }), 'Facture enregistrée.');
