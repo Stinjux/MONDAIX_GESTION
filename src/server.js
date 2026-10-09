@@ -18,6 +18,7 @@ import * as synchro from './services/synchroEmail.js';
 import * as asins from './services/asins.js';
 import * as stats from './services/statistiques.js';
 import * as documents from './services/documentsFactures.js';
+import * as ventes from './services/ventes.js';
 
 const DOSSIER_PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -46,6 +47,9 @@ export function creerRoutes(db) {
   r('GET', '/api/imports/inventaire', () => inventaire.listerImportsInventaire(db));
   r('DELETE', '/api/imports/inventaire/:id', ({ p }) => inventaire.supprimerImportInventaire(db, +p.id));
   r('POST', '/api/imports/inventaire/reinitialiser', () => inventaire.reinitialiserInventaire(db));
+  r('POST', '/api/imports/ventes', ({ corps }) => ventes.importerVentes(db, corps));
+  r('GET', '/api/imports/ventes', () => ventes.listerImportsVentes(db));
+  r('DELETE', '/api/imports/ventes/:id', ({ p }) => ventes.supprimerImportVentes(db, +p.id));
   r('GET', '/api/produits', () => asins.listerAsins(db));
   r('GET', '/api/produits/:asin', ({ p }) => asins.ficheAsin(db, p.asin));
   r('PUT', '/api/produits/:asin', ({ p, corps }) => {

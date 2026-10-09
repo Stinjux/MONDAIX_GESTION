@@ -46,7 +46,8 @@ export function brancherInventaire(zone) {
     const multi = r.asin_plusieurs_lignes.length
       ? ` ${r.asin_plusieurs_lignes.length} ASIN sur plusieurs lignes (SKU différents, quantités additionnées) : ${r.asin_plusieurs_lignes.slice(0, 5).map((x) => x.asin).join(', ')}${r.asin_plusieurs_lignes.length > 5 ? '…' : ''}.`
       : '';
-    toast(`Stock chez Amazon remplacé par cet import. ${r.produits} ASIN mis à jour, ${r.couts_ajoutes} coût(s) ajouté(s), ${r.ecarts.length} écart(s), ${r.rejets.length} rejet(s).${st}${doublons}${multi}`, { duree: 12000 });
+    const horsFba = r.hors_fba?.length ? ` ${r.hors_fba.length} offre(s) expédiée(s) par vous (mf) non comptée(s) dans le stock Amazon.` : '';
+    toast(`Stock chez Amazon remplacé par cet import. ${r.produits} ASIN mis à jour, ${r.couts_ajoutes} coût(s) ajouté(s), ${r.ecarts.length} écart(s), ${r.rejets.length} rejet(s).${st}${doublons}${multi}${horsFba}`, { duree: 12000 });
     etatInv.analyse = null;
     rafraichir();
   };

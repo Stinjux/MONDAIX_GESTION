@@ -89,7 +89,7 @@ function rendreIndicateurs(s) {
       ${indicateur(nombre.format(i.envois.courant), 'Envois Amazon expédiés', i.envois, { precedente })}
       ${indicateur(nombre.format(i.unites_envoyees.courant), 'Unités envoyées à Amazon', i.unites_envoyees, { precedente })}
       ${indicateur(montant(i.cogs.courant), 'COGS', i.cogs, { argent: true, precedente })}
-      ${indicateur(nombre.format(i.cogs.unites_vendues.courant), 'Unités vendues (estimées)', i.cogs.unites_vendues, { precedente })}
+      ${indicateur(nombre.format(i.cogs.unites_vendues.courant), i.cogs.unites_estimees ? 'Unités vendues (en partie estimées)' : 'Unités vendues', i.cogs.unites_vendues, { precedente })}
       <a class="tuile indicateur" href="#/asins"><div class="libelle">Stock total</div><div class="valeur">${nombre.format(i.stock_total.total)}</div>
         <div class="variation">Amazon ${nombre.format(i.stock_total.amazon)} · en transit ${nombre.format(i.stock_total.en_transit)} · à envoyer ${nombre.format(i.stock_total.a_envoyer)}</div>
         ${i.stock
@@ -105,8 +105,8 @@ function rendreIndicateurs(s) {
       ['ASIN', { t: 'Unités vendues', classe: 'num' }, { t: 'Coût d’achat HT / unité', classe: 'num' }, { t: 'COGS', classe: 'num' }],
       top.map((a) => `<tr><td>${asinLien(a.asin)}</td><td class="num">${nombre.format(a.unites)}</td>
         <td class="num">${a.cout_unitaire === null ? badge('sans coût', 'alerte') : montant(a.cout_unitaire)}</td><td class="num">${montant(a.montant)}</td></tr>`),
-      'Aucune vente constatée sur la période (il faut au moins deux imports d’inventaire).',
-      { videAction: { libelle: 'Importer l’inventaire', href: '#/asins' } },
+      'Aucune vente sur la période : importez votre rapport de commandes Amazon.',
+      { videAction: { libelle: 'Importer les ventes', href: '#/cogs' } },
     )}
     ${i.cogs.par_asin.length > top.length ? `<p class="aide">${i.cogs.par_asin.length - top.length} autre(s) ASIN dans le <a href="#/cogs">détail COGS</a>.</p>` : ''}`;
 }
@@ -116,7 +116,7 @@ export async function pageTableauDeBord(zone) {
   const [t, s, refs] = await Promise.all([api('/api/tableau-de-bord'), api(`/api/statistiques?periode=${periode}`), references()]);
   const c = t.compteurs;
   zone.innerHTML = `
-    ${entetePage({ titre: 'Tableau de bord', sousTitre: 'Achats, envois, ventes estimées et stock, comparés à la période précédente.', actions: selecteurPeriode(periode) })}
+    ${entetePage({ titre: 'Tableau de bord', sousTitre: 'Achats, envois, ventes et stock, comparés à la période précédente.', actions: selecteurPeriode(periode) })}
     <div id="indicateurs">${rendreIndicateurs(s)}</div>
 
     <h2>À vérifier</h2>

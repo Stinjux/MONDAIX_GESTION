@@ -31,7 +31,7 @@ export function importerInventaire(db, { texte, mapping, nom }) {
       .prepare("INSERT INTO imports (type, nom, mapping, entetes, nb_lignes) VALUES ('inventaire', ?, ?, ?, ?)")
       .run(nom || 'inventaire', JSON.stringify(map), JSON.stringify(entetes), lignes.length);
     const importId = Number(imp.lastInsertRowid);
-    const resultat = { import_id: importId, produits: 0, couts_ajoutes: 0, ecarts: [], rejets: [], doublons: [] };
+    const resultat = { import_id: importId, produits: 0, couts_ajoutes: 0, ecarts: [], rejets: [], doublons: [], hors_fba: [] };
     // ASIN → quantité. Plusieurs SKU d'un même ASIN sont additionnés ; une ligne répétée pour le
     // même SKU remplace la précédente (jamais comptée deux fois).
     const parSku = new Map(); // « ASIN | SKU » → quantité
@@ -46,7 +46,10 @@ export function importerInventaire(db, { texte, mapping, nom }) {
       const maj = {};
       if (map.sku !== undefined && l[map.sku]) maj.sku = l[map.sku];
       if (map.titre !== undefined && l[map.titre]) maj.titre = l[map.titre];
-      if (map.quantite !== undefined) {
+      // Offre expédiée par le vendeur (mf, merchant) : pas de stock chez Amazon.
+      const horsFba = map.expedition !== undefined && /^(mf|mfn|merchant|fbm|default)/i.test(String(l[map.expedition] || '').trim());
+      if (horsFba) resultat.hors_fba.push({ ligne: i + 2, asin });
+      if (map.quantite !== undefined && !horsFba) {
         // Quantité vide, nulle ou illisible : 0.
         const q = parserQuantite(l[map.quantite]) ?? 0;
         const sku = map.sku !== undefined ? String(l[map.sku] || '').trim() : '';

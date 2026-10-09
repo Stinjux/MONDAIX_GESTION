@@ -3,6 +3,7 @@ import { arrondir } from '../lib/parse.js';
 import { totalFacture } from './factures.js';
 import { etatStock, ventesEstimees } from './inventaire.js';
 import { listerAsins } from './asins.js';
+import { debutVentesReelles, finVentesReelles, ventesReelles } from './ventes.js';
 
 export const PERIODES = {
   '7j': { jours: 7, libelle: '7 derniers jours' },
@@ -68,23 +69,35 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
     env[cle].unites += e.unites;
   }
 
-  // COGS : unités vendues (estimées par la baisse du stock entre deux imports d'inventaire)
-  // × coût d'achat unitaire HT retenu.
+  // COGS : unités vendues × coût d'achat unitaire HT retenu.
+  // Ventes réelles (rapport de commandes Amazon) à partir du premier jour couvert par un rapport ;
+  // avant, ventes estimées par la baisse du stock entre deux imports d'inventaire.
   const couts = new Map(
     db.prepare('SELECT p.asin, c.montant_unitaire_ht AS cout FROM produits p JOIN couts_achat c ON c.id = p.cout_retenu_id').all().map((r) => [r.asin, r.cout]),
   );
-  const videCogs = () => ({ montant: 0, unites: 0, sans_cout: 0, parAsin: new Map() });
+  const debutReel = debutVentesReelles(db);
+  const ventes = [
+    ...ventesEstimees(db)
+      .filter((v) => !debutReel || v.date < debutReel)
+      .map((v) => ({ asin: v.asin, date: v.date, unites: v.vendues, montant: null, reelle: false })),
+    ...ventesReelles(db).map((v) => ({ ...v, reelle: true })),
+  ];
+  const videCogs = () => ({ montant: 0, unites: 0, sans_cout: 0, ca: 0, unites_estimees: 0, parAsin: new Map() });
   const cogs = { courant: videCogs(), precedent: videCogs() };
-  for (const v of ventesEstimees(db)) {
+  for (const v of ventes) {
     const cle = dans(v.date, debut, fin) ? 'courant' : dans(v.date, debutPrecedent, debut) ? 'precedent' : null;
     if (!cle) continue;
     const cout = couts.get(v.asin);
     const a = cogs[cle];
-    a.unites += v.vendues;
-    if (cout === undefined) a.sans_cout += v.vendues;
-    else a.montant += v.vendues * cout;
-    const ligne = a.parAsin.get(v.asin) || { asin: v.asin, unites: 0, cout_unitaire: cout ?? null, montant: 0 };
-    ligne.unites += v.vendues;
+    a.unites += v.unites;
+    if (!v.reelle) a.unites_estimees += v.unites;
+    a.ca += v.montant ?? 0;
+    if (cout === undefined) a.sans_cout += v.unites;
+    else a.montant += v.unites * cout;
+    const ligne = a.parAsin.get(v.asin) || { asin: v.asin, unites: 0, unites_estimees: 0, cout_unitaire: cout ?? null, montant: 0, ca: 0 };
+    ligne.unites += v.unites;
+    if (!v.reelle) ligne.unites_estimees += v.unites;
+    ligne.ca = arrondir(ligne.ca + (v.montant ?? 0));
     ligne.montant = cout === undefined ? null : arrondir(ligne.unites * cout);
     a.parAsin.set(v.asin, ligne);
   }
@@ -129,6 +142,11 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
         ...variation(arrondir(cogs.courant.montant), arrondir(cogs.precedent.montant)),
         unites_vendues: variation(cogs.courant.unites, cogs.precedent.unites),
         unites_sans_cout: cogs.courant.sans_cout,
+        unites_estimees: cogs.courant.unites_estimees,
+        // Chiffre d'affaires (item-price des commandes, hors taxes) et marge avant frais Amazon.
+        ca: variation(arrondir(cogs.courant.ca), arrondir(cogs.precedent.ca)),
+        marge_avant_frais: variation(arrondir(cogs.courant.ca - cogs.courant.montant), arrondir(cogs.precedent.ca - cogs.precedent.montant)),
+        ventes_reelles: { du: debutReel, au: finVentesReelles(db) },
         par_asin: [...cogs.courant.parAsin.values()].sort((a, b) => (b.montant ?? -1) - (a.montant ?? -1) || b.unites - a.unites),
       },
     },

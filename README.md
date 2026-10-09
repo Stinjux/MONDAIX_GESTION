@@ -86,8 +86,13 @@ Alternative cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.
   et **le coût retenu n’est pas modifié** : c’est à l’utilisateur de choisir la valeur à retenir. Tout est journalisé.
 - **Coût complet** = coût d’achat retenu + frais des factures (livraison, autres frais, taxes si l’option est activée)
   au prorata de la part de l’ASIN + frais d’envoi Amazon au prorata des unités + dépenses rattachées à l’ASIN.
-- **COGS** (tableau de bord) = unités vendues × coût d’achat HT retenu ; unités vendues estimées entre deux imports
-  d’inventaire : stock précédent + unités expédiées à Amazon entre les deux − stock actuel.
+- **COGS** (tableau de bord, page COGS) = unités vendues × coût d’achat HT retenu.
+  - Unités vendues = **rapport de commandes Amazon** (Seller Central › Rapports › Commandes › Toutes les commandes),
+    importé sur la page COGS. Une ligne par article (order-item-id) : réimporter une période la met à jour sans doublon ;
+    les commandes annulées ne comptent pas ; date = jour de la commande à l’heure de l’Est.
+  - Avant le premier jour couvert par un rapport : unités estimées entre deux imports d’inventaire
+    (stock précédent + unités expédiées à Amazon entre les deux − stock actuel).
+  - Chiffre d’affaires = item-price (hors taxes) ; marge avant frais Amazon = chiffre d’affaires − COGS.
 
 ### Stock
 
@@ -96,6 +101,7 @@ Alternative cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.
   10 → 15 = restock de 5 (envoi arrivé chez Amazon). Un envoi enregistré expédié entre deux imports explique une hausse ;
   une hausse sans envoi enregistré est un « restock non saisi ».
 - Le **premier import est le stock initial** : aucune vente n’est comptée avant lui.
+- Les offres expédiées par le vendeur (colonne fulfillment_type = mf) ne comptent pas dans le stock Amazon.
 - **Stock total** = chez Amazon (dernier import) + en transit (envois expédiés depuis le dernier import)
   + à envoyer (unités des factures non annulées − stock initial − restocks − en transit ; jamais négatif).
   Chaque unité n’est comptée qu’une fois.

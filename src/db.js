@@ -249,6 +249,31 @@ CREATE TABLE IF NOT EXISTS dossiers_autorisation (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Rapports de commandes Amazon importés (Seller Central › Rapports › Commandes).
+CREATE TABLE IF NOT EXISTS imports_ventes (
+  id INTEGER PRIMARY KEY,
+  nom TEXT,
+  nb_lignes INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Une ligne par article commandé ; réimporter la même commande la met à jour (statut, prix).
+CREATE TABLE IF NOT EXISTS ventes (
+  id INTEGER PRIMARY KEY,
+  cle TEXT NOT NULL UNIQUE,                    -- order-item-id (ou commande | SKU)
+  import_id INTEGER NOT NULL REFERENCES imports_ventes(id) ON DELETE CASCADE,
+  commande TEXT NOT NULL,
+  date_vente TEXT NOT NULL,                    -- jour de la commande, heure de l'Est
+  asin TEXT NOT NULL REFERENCES produits(asin),
+  sku TEXT,
+  quantite INTEGER NOT NULL,
+  statut TEXT,
+  annulee INTEGER NOT NULL DEFAULT 0,
+  canal TEXT,                                  -- Amazon (FBA) ou Merchant
+  montant REAL,                                -- item-price, hors taxes
+  devise TEXT
+);
+
 CREATE TABLE IF NOT EXISTS journal (
   id INTEGER PRIMARY KEY,
   entite TEXT NOT NULL,
@@ -264,6 +289,7 @@ CREATE INDEX IF NOT EXISTS idx_couts_asin ON couts_achat(asin);
 CREATE INDEX IF NOT EXISTS idx_emails_source ON emails(source, statut_rapprochement);
 CREATE INDEX IF NOT EXISTS idx_dossiers_asin ON dossiers_autorisation(asin);
 CREATE INDEX IF NOT EXISTS idx_email_liens_valeur ON email_liens(type, valeur);
+CREATE INDEX IF NOT EXISTS idx_ventes_date ON ventes(date_vente);
 `;
 
 const PARAMETRES_DEFAUT = {

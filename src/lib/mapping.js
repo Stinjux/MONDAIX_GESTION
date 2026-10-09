@@ -9,6 +9,11 @@ export const CHAMPS_INVENTAIRE = {
     synonymes: ['cost', 'cout', 'cout unitaire', 'cout achat', 'unit cost', 'cost per unit', 'prix achat', 'buy cost'],
   },
   sku: { libelle: 'SKU', obligatoire: false, synonymes: ['sku', 'seller sku', 'msku', 'merchant sku'] },
+  expedition: {
+    libelle: 'Mode d’expédition (fba / mf)',
+    obligatoire: false,
+    synonymes: ['fulfillment type', 'fulfillment channel', 'fulfilment type', 'fulfilled by', 'expedition'],
+  },
   titre: { libelle: 'Titre', obligatoire: false, synonymes: ['title', 'titre', 'product name', 'nom', 'item name', 'name', 'description'] },
   quantite: {
     libelle: 'Quantité en inventaire',

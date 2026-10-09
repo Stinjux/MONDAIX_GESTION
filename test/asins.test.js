@@ -264,7 +264,7 @@ test('COGS : ventes estimées par la baisse du stock entre deux imports × coût
   assert.equal(c.unites_vendues.courant, 4);
   assert.equal(c.courant, 16);
   assert.equal(c.unites_sans_cout, 0);
-  assert.deepEqual(c.par_asin, [{ asin: 'B0AAAAAAA1', unites: 4, cout_unitaire: 4, montant: 16 }]);
+  assert.deepEqual(c.par_asin, [{ asin: 'B0AAAAAAA1', unites: 4, unites_estimees: 4, cout_unitaire: 4, montant: 16, ca: 0 }]);
 });
 
 test('import d’inventaire supprimé par erreur : stock, coûts et coût retenu reviennent à l’état précédent', async () => {
