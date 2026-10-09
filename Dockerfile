@@ -1,4 +1,4 @@
-FROM node:22-alpine
+FROM public.ecr.aws/docker/library/node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 MONDAIX_DB=/app/data/mondaix.sqlite
 COPY package.json package-lock.json ./
