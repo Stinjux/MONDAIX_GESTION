@@ -266,3 +266,22 @@ test('COGS : ventes estimées par la baisse du stock entre deux imports × coût
   assert.equal(c.unites_sans_cout, 0);
   assert.deepEqual(c.par_asin, [{ asin: 'B0AAAAAAA1', unites: 4, cout_unitaire: 4, montant: 16 }]);
 });
+
+test('stock total = chez Amazon (import) + en transit + à envoyer (acheté sur factures, pas encore expédié)', () => {
+  creerFacture(db, { numero_facture: 'F-1', total: 100, lignes: [{ asin: 'B0AAAAAAA1', quantite: 20, prix_unitaire_ht: 5 }] });
+  const fa = creerFacture(db, { numero_facture: 'F-2', total: 30, lignes: [{ asin: 'B0AAAAAAA1', quantite: 6, prix_unitaire_ht: 5 }] });
+  annulerFacture(db, fa.id, { date_annulation: '2026-10-01' }); // remboursée : ne compte pas
+  const e1 = creerEnvoi(db, { numero_envoi: 'FBA1', date_envoi: '2026-10-01', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 8 }] });
+  toutRecu(db, e1);
+  creerEnvoi(db, { numero_envoi: 'FBA2', date_envoi: '2026-10-05', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 5 }] });
+  creerEnvoi(db, { numero_envoi: 'FBA3', lignes: [{ asin: 'B0AAAAAAA1', quantite: 2 }] }); // en préparation : encore chez vous
+  inv(db, 'asin,qty\nB0AAAAAAA1,7\n', 'inv-1');
+  const p = listerAsins(db).find((x) => x.asin === 'B0AAAAAAA1');
+  // Amazon 7 + en transit 5 + à envoyer (20 achetées − 13 expédiées) 7 = 19
+  assert.deepEqual(p.stock_total, { amazon: 7, en_transit: 5, a_envoyer: 7, total: 19 });
+  assert.deepEqual(ficheAsin(db, 'B0AAAAAAA1').stock_total, p.stock_total);
+  assert.deepEqual(statistiques(db, '30j', new Date('2026-10-08T12:00:00Z')).indicateurs.stock_total, { total: 19, amazon: 7, en_transit: 5, a_envoyer: 7 });
+  // Plus d'unités expédiées qu'achetées (factures manquantes) : « à envoyer » ne devient jamais négatif
+  creerEnvoi(db, { numero_envoi: 'FBA4', date_envoi: '2026-10-06', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA2', quantite: 3 }] });
+  assert.equal(listerAsins(db).find((x) => x.asin === 'B0AAAAAAA2').stock_total.a_envoyer, 0);
+});

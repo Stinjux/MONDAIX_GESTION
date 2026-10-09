@@ -25,6 +25,18 @@ const STOCK_VIDE = { quantite: 0, precedente: null, ecart: null, absent: true };
 // ASIN sans facture associée.
 const DEPENSES_VIDES = { montant: 0, ht: 0, frais: 0, unites: 0, nb_factures: 0, estimee: false, cout_moyen_unite: null };
 
+/**
+ * Stock total d'un ASIN = stock chez Amazon (dernier import d'inventaire)
+ *   + unités en transit (envoyées, réception non confirmée)
+ *   + unités à envoyer (achetées sur factures non annulées, pas encore expédiées à Amazon).
+ */
+export function stockTotal(p, stockAmazon) {
+  const amazon = stockAmazon.quantite;
+  const enTransit = p.unites_en_transit;
+  const aEnvoyer = Math.max(0, p.unites_achetees - p.unites_envoyees);
+  return { amazon, en_transit: enTransit, a_envoyer: aEnvoyer, total: amazon + enTransit + aEnvoyer };
+}
+
 export function listerAsins(db) {
   const stock = etatStock(db);
   const depenses = depensesFacturesParAsin(db);
@@ -44,9 +56,11 @@ export function listerAsins(db) {
     .all()
     .map((p) => {
       const d = dernierDossier.get(p.asin);
+      const stockAmazon = stock.parAsin.get(p.asin) || STOCK_VIDE;
       return {
         ...p,
-        stock: stock.parAsin.get(p.asin) || STOCK_VIDE,
+        stock: stockAmazon,
+        stock_total: stockTotal(p, stockAmazon),
         depenses_factures: depenses.get(p.asin) || DEPENSES_VIDES,
         autorisation: d ? { dossier_id: d.id, statut: d.statut, confirme: estConfirme(d), numero_cas: d.numero_cas } : null,
         nb_emails: nbEmails.get(p.asin, p.asin).n,
@@ -170,6 +184,7 @@ export function ficheAsin(db, asin) {
   return {
     ...produit,
     stock: etatStock(db).parAsin.get(asin) || STOCK_VIDE,
+    stock_total: stockTotal(produit, etatStock(db).parAsin.get(asin) || STOCK_VIDE),
     depenses_factures: depensesFacturesParAsin(db).get(asin) || DEPENSES_VIDES,
     historique_stock: historiqueStock,
     cout_retenu: coutRetenu(db, asin),

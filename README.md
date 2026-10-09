@@ -89,6 +89,13 @@ Alternative cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.
 - **COGS** (tableau de bord) = unités vendues × coût d’achat HT retenu ; unités vendues estimées entre deux imports
   d’inventaire : stock précédent + unités expédiées à Amazon entre les deux − stock actuel.
 
+### Stock
+
+- **Stock total** d’un ASIN = **chez Amazon** (dernier import du fichier d’inventaire Amazon, comparé à l’import précédent)
+  + **en transit** (envoyé à Amazon, réception non confirmée) + **à envoyer** (unités des factures non annulées
+  pas encore expédiées à Amazon ; jamais négatif). Les états En stock / Stock bas / Rupture et Actif / Inactif
+  suivent ce stock total.
+
 ### 4. Envois Amazon et réception
 
 - Envoi : ASIN glissés-déposés avec les quantités envoyées, n° et date d’expédition saisis à la main.

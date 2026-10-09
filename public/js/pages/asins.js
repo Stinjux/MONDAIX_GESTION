@@ -17,7 +17,9 @@ function lienListe(filtre, tri) {
 }
 
 // Actif : au moins une unité en stock au dernier import d'inventaire ; inactif : 0 (ou jamais importé).
-const estActif = (p) => p.stock?.quantite > 0;
+// Stock total = stock chez Amazon (import) + en transit + à envoyer (acheté sur factures, pas encore expédié).
+const total = (p) => p.stock_total?.total ?? 0;
+const estActif = (p) => total(p) > 0;
 
 // Seuil d'alerte « stock bas » : préférence d'affichage, enregistrée dans ce navigateur.
 const SEUIL_DEFAUT = 5;
@@ -62,7 +64,7 @@ export async function pageAsins(zone) {
     '': ['Tous', () => true],
     actifs: ['Actifs (en stock)', estActif],
     inactifs: ['Inactifs (0 en stock)', (p) => !estActif(p)],
-    bas: ['Stock bas', (p) => etatStock(p.stock?.quantite, seuil).cle === 'bas'],
+    bas: ['Stock bas', (p) => etatStock(total(p), seuil).cle === 'bas'],
     ecarts: ['Écarts de coût', (p) => asinsEcart.has(p.asin)],
     sans_cout: ['Sans coût d’achat', (p) => p.cout_retenu === null],
     autorisation: ['Autorisation non confirmée', (p) => !p.autorisation?.confirme],
@@ -74,7 +76,7 @@ export async function pageAsins(zone) {
   zone.innerHTML = `
     ${entetePage({
       titre: 'Stocks',
-      sousTitre: 'Tous les ASIN : stock Amazon (dernier import d’inventaire), achats, envois et coûts. Cliquez sur un ASIN pour sa page Amazon, sur « fiche » pour son historique.',
+      sousTitre: 'Stock total par ASIN : chez Amazon (votre import d’inventaire Amazon) + en transit + à envoyer (acheté sur vos factures, pas encore expédié). Cliquez sur un ASIN pour sa page Amazon, sur « fiche » pour son historique.',
       actions: `<button type="button" class="principal" id="ouvrir-import">${icone('upload')}Importer l’inventaire</button>`,
     })}
     <div class="filtres">
@@ -92,12 +94,13 @@ export async function pageAsins(zone) {
       [
         'ASIN',
         'Titre',
-        { t: 'Stock', classe: 'num' },
+        { t: 'Stock total', classe: 'num' },
         'État',
+        { t: 'Chez Amazon', classe: 'num' },
+        { t: 'En transit', classe: 'num' },
+        { t: 'À envoyer', classe: 'num' },
         { t: 'Coût HT', classe: 'num' },
         { t: 'Acheté', classe: 'num' },
-        { t: 'Envoyé', classe: 'num' },
-        { t: 'Reçu Amazon', classe: 'num' },
         { t: 'Dépensé', classe: 'num' },
         'Autorisation',
         'Dern. facture',
@@ -108,11 +111,13 @@ export async function pageAsins(zone) {
         return `<tr>
           <td>${asinLien(p.asin)}</td>
           <td class="titre">${esc(p.titre || '')}${p.sku ? `<span class="aide sous">SKU ${esc(p.sku)}</span>` : ''}</td>
+          <td class="num" data-tri="${total(p)}"><strong>${total(p)}</strong></td>
+          <td>${etatStock(total(p), seuil).badge}<span class="aide sous">${estActif(p) ? 'actif' : 'inactif'}</span></td>
           <td class="num" data-tri="${p.stock.quantite}">${celluleStock(p.stock)}</td>
-          <td>${etatStock(p.stock.quantite, seuil).badge}<span class="aide sous">${estActif(p) ? 'actif' : 'inactif'}</span></td>
+          <td class="num">${p.stock_total.en_transit}</td>
+          <td class="num">${p.stock_total.a_envoyer}</td>
           <td class="num">${montant(p.cout_retenu)}${asinsEcart.has(p.asin) ? '<br>' + badge('écart', 'alerte') : ''}</td>
-          <td class="num">${p.unites_achetees}</td><td class="num">${p.unites_envoyees}</td>
-          <td class="num">${p.unites_recues_amazon}${p.unites_en_transit ? `<span class="aide sous">${p.unites_en_transit} en transit</span>` : ''}</td>
+          <td class="num">${p.unites_achetees}</td>
           <td class="num">${celluleDepense(p.depenses_factures)}</td>
           <td>${a ? `<a href="#/dossiers/${a.dossier_id}">${badge(refs.statuts_dossier[a.statut] + (a.confirme ? ' ✓' : ''), TONS_DOSSIER[a.statut])}</a>` : badge('aucun dossier')}</td>
           <td>${date(p.derniere_facture)}</td>
@@ -121,8 +126,8 @@ export async function pageAsins(zone) {
       q || filtre ? 'Aucun ASIN ne correspond à ces critères.' : 'Aucun ASIN : importez votre fichier d’inventaire ou déposez une facture.',
       { videAction: q || filtre ? { libelle: 'Voir tous les ASIN', href: '#/asins' } : { libelle: 'Déposer une facture', href: '#/factures' } },
     )}
-    <p class="aide">Dépensé (factures) = part des factures associées à l’ASIN, taxes, livraison et frais compris (au prorata du montant HT des articles).
-      Acheté = unités des factures non annulées. Stock : dernier import du fichier d’inventaire, avec l’écart depuis l’import précédent.</p>
+    <p class="aide">Stock total = chez Amazon (dernier import du fichier d’inventaire, avec l’écart depuis l’import précédent) + en transit (envoyé, réception non confirmée)
+      + à envoyer (acheté sur factures non annulées, pas encore expédié à Amazon). Dépensé = part des factures associées à l’ASIN, frais compris.</p>
     <details class="carte" id="bloc-import" ${importEnCours() ? 'open' : ''}><summary><strong>Importer le fichier d’inventaire</strong> (colonne cost = coût d’achat unitaire HT)</summary>
       <div id="inventaire" class="pile">${rendreInventaire()}</div></details>`;
 
@@ -197,16 +202,16 @@ export async function pageAsin(zone, asin) {
     ${entetePage({
       retour: { href: '#/asins', libelle: '← Stocks' },
       titreHtml: asinLien(p.asin, { fiche: false }),
-      sousTitre: `${esc(p.titre || 'Sans titre')}${p.sku ? ' · SKU ' + esc(p.sku) : ''} · ${etatStock(p.stock.quantite).badge}`,
+      sousTitre: `${esc(p.titre || 'Sans titre')}${p.sku ? ' · SKU ' + esc(p.sku) : ''} · ${etatStock(p.stock_total.total).badge}`,
       actions: `<a class="bouton" href="${esc(urlAmazon(p.asin))}" target="_blank" rel="noopener noreferrer">${icone('external-link')}Ouvrir sur Amazon</a>
         <button type="button" id="modifier">Titre / SKU</button><button type="button" class="principal" id="cout-manuel">${icone('plus')}Saisir un coût</button>`,
     })}
 
     <div class="grille grille-4">
-      ${tuile(`${p.stock.quantite}${p.stock.ecart ? ` <span class="variation">${ecartTexte(p.stock.ecart)}</span>` : ''}`, 'Unités en stock (dernier import)')}
-      ${tuile(p.unites_achetees, 'Unités achetées (factures)')}
-      ${tuile(p.unites_envoyees, 'Unités expédiées à Amazon')}
-      ${tuile(`${p.unites_recues_amazon}${p.unites_en_transit ? ` <span class="variation">${p.unites_en_transit} en transit</span>` : ''}`, 'Unités reçues par Amazon')}
+      ${tuile(p.stock_total.total, 'Stock total (Amazon + en transit + à envoyer)')}
+      ${tuile(`${p.stock.quantite}${p.stock.ecart ? ` <span class="variation">${ecartTexte(p.stock.ecart)}</span>` : ''}`, 'Chez Amazon (dernier import)')}
+      ${tuile(p.stock_total.en_transit, `En transit vers Amazon (${p.unites_recues_amazon} reçue(s) au total)`)}
+      ${tuile(p.stock_total.a_envoyer, `À envoyer : ${p.unites_achetees} achetée(s) − ${p.unites_envoyees} expédiée(s)`)}
       ${tuile(montant(cc.par_unite.achat), 'Coût d’achat HT retenu / unité')}
       ${tuile(montant(df.cout_moyen_unite), `Coût moyen facturé / unité (${df.unites} u.)`)}
       ${tuile(montant(cc.cout_complet_unitaire), 'Coût complet / unité')}

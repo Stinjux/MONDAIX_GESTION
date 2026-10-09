@@ -2,6 +2,7 @@
 import { arrondir } from '../lib/parse.js';
 import { totalFacture } from './factures.js';
 import { etatStock, ventesEstimees } from './inventaire.js';
+import { listerAsins } from './asins.js';
 
 export const PERIODES = {
   '7j': { jours: 7, libelle: '7 derniers jours' },
@@ -114,6 +115,16 @@ export function statistiques(db, periode = '30j', maintenant = new Date()) {
       envois: variation(env.courant.envois, env.precedent.envois),
       unites_envoyees: variation(env.courant.unites, env.precedent.unites),
       stock,
+      // Stock total = chez Amazon + en transit + à envoyer (acheté sur factures, pas encore expédié).
+      stock_total: listerAsins(db).reduce(
+        (t, p) => ({
+          total: t.total + p.stock_total.total,
+          amazon: t.amazon + p.stock_total.amazon,
+          en_transit: t.en_transit + p.stock_total.en_transit,
+          a_envoyer: t.a_envoyer + p.stock_total.a_envoyer,
+        }),
+        { total: 0, amazon: 0, en_transit: 0, a_envoyer: 0 },
+      ),
       cogs: {
         ...variation(arrondir(cogs.courant.montant), arrondir(cogs.precedent.montant)),
         unites_vendues: variation(cogs.courant.unites, cogs.precedent.unites),

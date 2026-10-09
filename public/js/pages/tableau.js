@@ -90,16 +90,15 @@ function rendreIndicateurs(s) {
       ${indicateur(nombre.format(i.unites_envoyees.courant), 'Unités envoyées à Amazon', i.unites_envoyees, { precedente })}
       ${indicateur(montant(i.cogs.courant), 'COGS', i.cogs, { argent: true, precedente })}
       ${indicateur(nombre.format(i.cogs.unites_vendues.courant), 'Unités vendues (estimées)', i.cogs.unites_vendues, { precedente })}
-      ${i.stock
-        ? indicateur(nombre.format(i.stock.courant), `Unités en stock (import du ${date(i.stock.date_import)})`, i.stock, {
-            stock: true,
-            precedente: i.stock.date_import_precedent ? `l’import du ${date(i.stock.date_import_precedent)}` : null,
-          })
-        : `<a class="tuile indicateur" href="#/asins"><div class="libelle">Unités en stock</div><div class="valeur">0</div><div class="variation">Aucun import d’inventaire (page Stocks)</div></a>`}
+      <a class="tuile indicateur" href="#/asins"><div class="libelle">Stock total</div><div class="valeur">${nombre.format(i.stock_total.total)}</div>
+        <div class="variation">Amazon ${nombre.format(i.stock_total.amazon)} · en transit ${nombre.format(i.stock_total.en_transit)} · à envoyer ${nombre.format(i.stock_total.a_envoyer)}</div>
+        ${i.stock
+          ? variation(i.stock, { stock: true, precedente: i.stock.date_import_precedent ? `l’import du ${date(i.stock.date_import_precedent)}` : null })
+          : '<div class="variation">Aucun import d’inventaire Amazon</div>'}</a>
     </div>
     <p class="aide">Du ${date(s.du)} (exclu) au ${date(s.au)}, selon la date de chaque facture. Dépenses = total des factures (taxes, livraison et frais compris)${
       i.depenses.factures_annulees ? ` ; ${i.depenses.factures_annulees} facture(s) annulée(s) et remboursée(s) (${montant(i.depenses.montant_annule)}) non comptée(s)` : ''
-    }. Stock : dernier import du fichier d’inventaire, comparé à l’import précédent (indépendant de la période).</p>
+    }. Stock total = chez Amazon (dernier import d’inventaire, écart avec l’import précédent) + en transit + à envoyer (acheté sur factures, pas encore expédié) ; indépendant de la période.</p>
 
     <div class="section-titre"><h2>COGS de la période</h2><a class="bouton" href="#/cogs">${icone('calculator')}Détail COGS</a></div>
     ${tableau(

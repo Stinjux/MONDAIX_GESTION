@@ -26,7 +26,7 @@ function rendre(s, produits) {
         { t: 'Coût HT / u', classe: 'num' },
         { t: 'Coût facturé / u', classe: 'num' },
         { t: 'COGS', classe: 'num' },
-        { t: 'Stock', classe: 'num' },
+        { t: 'Chez Amazon', classe: 'num' },
       ],
       i.cogs.par_asin.map((a) => {
         const p = parAsin.get(a.asin) || {};
