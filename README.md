@@ -95,10 +95,11 @@ Alternative cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.
 - Le **premier import est le stock initial** : aucune vente n’est comptée avant lui.
 - Un import fait par erreur se **supprime** (page Stocks, « Imports d’inventaire Amazon ») : le stock redevient celui de
   l’import précédent et les coûts ajoutés par cet import sont retirés (le coût précédent est repris s’il était retenu).
-- **Stock total** d’un ASIN = **chez Amazon** + **en transit** + **à envoyer**. Le stock chez Amazon fait partie des
-  unités achetées, il ne s’y ajoute pas : à envoyer = unités des factures non annulées − unités sorties, où les sorties
-  sont au moins les envois enregistrés et au moins ce qui est vu chez Amazon, en transit ou vendu (ventes estimées).
-- Si chez Amazon + en transit dépasse les unités achetées, l’ASIN est signalé « Amazon > acheté » (facture manquante).
+- **Stock total** d’un ASIN : chaque unité vient d’une facture et n’est comptée qu’une fois. Total = unités achetées
+  (factures non annulées) − ventes estimées, jamais moins que le stock vu chez Amazon ; réparti entre **chez Amazon**,
+  **en transit** (envois non confirmés, sans dépasser ce qui n’est pas déjà chez Amazon — un envoi arrivé mais non
+  confirmé n’est pas compté deux fois, il est signalé « réception à confirmer ») et **à envoyer** (chez vous).
+- Si le stock chez Amazon dépasse les unités achetées, l’ASIN est signalé « Amazon > acheté » (facture manquante).
 - Les états En stock / Stock bas / Rupture et Actif / Inactif suivent le stock total.
 
 ### 4. Envois Amazon et réception

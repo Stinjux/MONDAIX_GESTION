@@ -115,8 +115,9 @@ export async function pageAsins(zone) {
           <td class="num" data-tri="${total(p)}"><strong>${total(p)}</strong></td>
           <td>${etatStock(total(p), seuil).badge}<span class="aide sous">${estActif(p) ? 'actif' : 'inactif'}</span></td>
           <td class="num" data-tri="${p.stock.quantite}">${celluleStock(p.stock)}${p.stock_total.incoherent
-            ? `<span class="sous" title="Chez Amazon + en transit (${p.stock_total.amazon + p.stock_total.en_transit}) dépasse les unités achetées sur vos factures (${p.stock_total.achetees}) : une facture manque probablement.">${badge('> acheté', 'alerte')}</span>` : ''}</td>
-          <td class="num">${p.stock_total.en_transit}</td>
+            ? `<span class="sous" title="Chez Amazon (${p.stock_total.amazon}) dépasse les unités achetées sur vos factures (${p.stock_total.achetees}) : une facture manque probablement.">${badge('> acheté', 'alerte')}</span>` : ''}</td>
+          <td class="num">${p.stock_total.en_transit}${p.stock_total.reception_a_confirmer
+            ? `<a class="sous" href="#/envois?filtre=a_verifier" title="${p.stock_total.reception_a_confirmer} unité(s) d’envois non confirmés sont déjà chez Amazon : confirmez la réception de l’envoi.">${badge('réception à confirmer', 'info')}</a>` : ''}</td>
           <td class="num">${p.stock_total.a_envoyer}</td>
           <td class="num">${montant(p.cout_retenu)}${asinsEcart.has(p.asin) ? '<br>' + badge('écart', 'alerte') : ''}</td>
           <td class="num">${p.unites_achetees}</td>
@@ -128,8 +129,8 @@ export async function pageAsins(zone) {
       q || filtre ? 'Aucun ASIN ne correspond à ces critères.' : 'Aucun ASIN : importez votre fichier d’inventaire ou déposez une facture.',
       { videAction: q || filtre ? { libelle: 'Voir tous les ASIN', href: '#/asins' } : { libelle: 'Déposer une facture', href: '#/factures' } },
     )}
-    <p class="aide">Stock total = chez Amazon (dernier import, qui remplace le précédent) + en transit + à envoyer. Le stock chez Amazon fait partie des unités achetées :
-      à envoyer = achetées sur factures − unités sorties (envoyées, ou vues chez Amazon, en transit ou vendues). « Amazon > acheté » signale une facture probablement manquante.</p>
+    <p class="aide">Chaque unité vient d’une facture et n’est comptée qu’une fois : stock total = achetées − vendues (estimées), réparti entre chez Amazon (dernier import, qui remplace le précédent),
+      en transit (envois non confirmés pas encore visibles chez Amazon) et à envoyer (chez vous). « Amazon > acheté » signale une facture probablement manquante.</p>
     <details class="carte" id="bloc-import" ${importEnCours() ? 'open' : ''}><summary><strong>Importer le fichier d’inventaire</strong> (colonne cost = coût d’achat unitaire HT)</summary>
       <div id="inventaire" class="pile">${rendreInventaire()}</div></details>
 
@@ -246,7 +247,9 @@ export async function pageAsin(zone, asin) {
       ${tuile(montant(df.montant), `Dépense totale (${df.nb_factures} facture(s))`)}
     </div>
 
-    ${p.stock_total.incoherent ? `<div class="message alerte">Chez Amazon + en transit (${p.stock_total.amazon + p.stock_total.en_transit} unités) dépasse les unités achetées sur vos factures (${p.stock_total.achetees}).
+    ${p.stock_total.reception_a_confirmer ? `<div class="message info">${p.stock_total.reception_a_confirmer} unité(s) d’envois non confirmés sont déjà comptées chez Amazon (elles ne sont pas comptées deux fois).
+      <a href="#/envois?filtre=a_verifier">Confirmez la réception de l’envoi</a> pour mettre le suivi à jour.</div>` : ''}
+    ${p.stock_total.incoherent ? `<div class="message alerte">Chez Amazon (${p.stock_total.amazon} unités) dépasse les unités achetées sur vos factures (${p.stock_total.achetees}).
       Le stock chez Amazon ne peut pas dépasser ce qui a été acheté : une facture manque probablement pour cet ASIN.</div>` : ''}
     <div class="deux-colonnes">
       <div class="carte"><h3 class="sans-marge">Coût complet par unité ${formule('Coût complet = achat HT + frais des factures (au prorata) + frais d’envoi Amazon (au prorata des unités) + dépenses rattachées à l’ASIN.')}</h3>

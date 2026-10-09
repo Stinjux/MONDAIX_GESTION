@@ -26,26 +26,31 @@ const STOCK_VIDE = { quantite: 0, precedente: null, ecart: null, absent: true };
 const DEPENSES_VIDES = { montant: 0, ht: 0, frais: 0, unites: 0, nb_factures: 0, estimee: false, cout_moyen_unite: null };
 
 /**
- * Stock total d'un ASIN, cohérent avec les achats : le stock chez Amazon fait partie des unités achetées,
- * il ne s'y ajoute pas.
- *   sorties = unités ayant quitté vos mains, au moins égales aux envois enregistrés et à ce qu'on
- *             observe chez Amazon (stock + en transit + ventes estimées) — envois non saisis compris ;
- *   à envoyer = achetées (factures non annulées) − sorties (jamais négatif) ;
- *   total = chez Amazon + en transit + à envoyer.
- * Si Amazon + en transit dépasse les achats, une facture manque probablement : signalé.
+ * Stock total d'un ASIN, cohérent avec les achats : chaque unité vient d'une facture et n'est comptée
+ * qu'une fois, chez Amazon, en transit ou chez vous.
+ *   total = achetées − vendues (estimées), jamais moins que le stock vu chez Amazon
+ *           (sans facture : chez Amazon + en transit) ;
+ *   en transit = envois non confirmés, sans dépasser ce qui n'est pas déjà chez Amazon
+ *                (un envoi arrivé mais non confirmé n'est pas compté deux fois) ;
+ *   à envoyer = le reste, sans dépasser les unités achetées non expédiées.
+ * Chez Amazon au-delà des achats : une facture manque probablement (signalé).
  */
 export function stockTotal(p, stockAmazon, vendues = 0) {
   const amazon = stockAmazon.quantite;
-  const enTransit = p.unites_en_transit;
-  const sorties = Math.max(p.unites_envoyees, amazon + enTransit + vendues);
-  const aEnvoyer = Math.max(0, p.unites_achetees - sorties);
+  const achetees = p.unites_achetees;
+  const transitEnregistre = p.unites_en_transit;
+  const total = achetees > 0 ? Math.max(amazon, achetees - vendues) : amazon + transitEnregistre;
+  const enTransit = Math.min(transitEnregistre, Math.max(0, total - amazon));
+  const aEnvoyer = Math.min(Math.max(0, total - amazon - enTransit), Math.max(0, achetees - p.unites_envoyees));
   return {
     amazon,
     en_transit: enTransit,
     a_envoyer: aEnvoyer,
     total: amazon + enTransit + aEnvoyer,
-    achetees: p.unites_achetees,
-    incoherent: amazon + enTransit > p.unites_achetees,
+    achetees,
+    // Unités d'envois non confirmés déjà visibles chez Amazon : réception à confirmer dans l'envoi.
+    reception_a_confirmer: transitEnregistre - enTransit,
+    incoherent: achetees > 0 && amazon > achetees,
   };
 }
 

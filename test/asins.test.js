@@ -275,7 +275,7 @@ test('stock total cohérent avec les factures : le stock Amazon fait partie des 
   assert.deepEqual([total().a_envoyer, total().total], [14, 14], 'avant import : tout est chez vous');
   // Envois non saisis : 14 achetées, 14 vues chez Amazon → 14 au total, pas 28
   inv(db, 'asin,qty\nB0AAAAAAA1,14\n', 'inv-1');
-  assert.deepEqual(total(), { amazon: 14, en_transit: 0, a_envoyer: 0, total: 14, achetees: 14, incoherent: false });
+  assert.deepEqual(total(), { amazon: 14, en_transit: 0, a_envoyer: 0, total: 14, achetees: 14, reception_a_confirmer: 0, incoherent: false });
   inv(db, 'asin,qty\nB0AAAAAAA1,14\n', 'inv-1');
   assert.equal(total().total, 14, 'réimport du même fichier : stock inchangé');
   // 4 ventes : Amazon passe à 10, le total aussi (les unités vendues ne reviennent pas « à envoyer »)
@@ -318,4 +318,23 @@ test('import d’inventaire supprimé par erreur : stock, coûts et coût retenu
   const r3 = im('asin,qty,cost\nB0AAAAAAA1,12,\n', 'oct.csv');
   supprimerImportInventaire(db, r1.import_id);
   assert.deepEqual(listerImportsInventaire(db).map((i) => [i.id, i.stock_initial]), [[r3.import_id, true]]);
+});
+
+test('envoi arrivé chez Amazon mais réception non confirmée : pas de double comptage avec l’import', () => {
+  creerFacture(db, { numero_facture: 'F', total: 140, lignes: [{ asin: 'B0AAAAAAA1', quantite: 14, prix_unitaire_ht: 10 }] });
+  creerEnvoi(db, { numero_envoi: 'FBA1', date_envoi: '2026-10-01', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA1', quantite: 14 }] });
+  const total = () => listerAsins(db).find((x) => x.asin === 'B0AAAAAAA1').stock_total;
+  assert.deepEqual([total().amazon, total().en_transit, total().total], [0, 14, 14], 'avant import : en transit');
+  inv(db, 'asin,qty\nB0AAAAAAA1,14\n', 'inv-1');
+  assert.deepEqual([total().amazon, total().en_transit, total().a_envoyer, total().total], [14, 0, 0, 14], '14, pas 28');
+  assert.equal(total().reception_a_confirmer, 14);
+  assert.equal(total().incoherent, false);
+  inv(db, 'asin,qty\nB0AAAAAAA1,14\n', 'inv-1');
+  assert.equal(total().total, 14, 'nouvel import identique : inchangé');
+  // Arrivée partielle : 10 vues chez Amazon, 4 encore en transit
+  creerFacture(db, { numero_facture: 'F2', total: 100, lignes: [{ asin: 'B0AAAAAAA2', quantite: 10, prix_unitaire_ht: 10 }] });
+  creerEnvoi(db, { numero_envoi: 'FBA2', date_envoi: '2026-10-02', statut: 'expedie', lignes: [{ asin: 'B0AAAAAAA2', quantite: 10 }] });
+  inv(db, 'asin,qty\nB0AAAAAAA1,14\nB0AAAAAAA2,6\n', 'inv-2');
+  const b = listerAsins(db).find((x) => x.asin === 'B0AAAAAAA2').stock_total;
+  assert.deepEqual([b.amazon, b.en_transit, b.a_envoyer, b.total], [6, 4, 0, 10]);
 });
