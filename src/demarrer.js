@@ -8,6 +8,7 @@ import { planifierSynchro } from './services/synchroEmail.js';
 import { migrerGmailVersAsin, migrerLiensEmails, migrerNeoVersAsin } from './services/emails.js';
 import { migrerReinitialisationInventaire, migrerRelevesStock } from './services/inventaire.js';
 import { migrerReferencesFactures } from './services/documentsFactures.js';
+import { migrerRemiseAZero } from './services/remiseAZero.js';
 
 /**
  * L'application est considérée comme exposée sur Internet si elle écoute ailleurs
@@ -56,6 +57,8 @@ export function demarrer() {
   const reinit = migrerReinitialisationInventaire(db);
   if (reinit) console.log(`Inventaire remis à zéro : ${reinit.imports_supprimes} import(s) supprimé(s) (factures conservées).`);
   migrerReferencesFactures(db);
+  const zero = migrerRemiseAZero(db);
+  if (zero) console.log(`Données remises à zéro (paramètres conservés). Sauvegarde : ${zero.sauvegarde}`);
   const serveur = creerServeur(db, { acces: { utilisateur: process.env.MONDAIX_UTILISATEUR || 'admin', motDePasse } });
   // Sous Passenger, l'appel à listen() est intercepté : le port et l'hôte sont alors ignorés.
   serveur.listen(port, hote, () => console.log(`Mondaix Gestion : http://${hote}:${port}${motDePasse ? ' (protégé par mot de passe)' : ''}`));
