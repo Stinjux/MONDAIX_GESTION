@@ -65,6 +65,7 @@ export async function pageAsins(zone) {
     actifs: ['Actifs (en stock)', estActif],
     inactifs: ['Inactifs (0 en stock)', (p) => !estActif(p)],
     bas: ['Stock bas', (p) => etatStock(total(p), seuil).cle === 'bas'],
+    incoherent: ['Amazon > acheté', (p) => p.stock_total.incoherent],
     ecarts: ['Écarts de coût', (p) => asinsEcart.has(p.asin)],
     sans_cout: ['Sans coût d’achat', (p) => p.cout_retenu === null],
     autorisation: ['Autorisation non confirmée', (p) => !p.autorisation?.confirme],
@@ -113,7 +114,8 @@ export async function pageAsins(zone) {
           <td class="titre">${esc(p.titre || '')}${p.sku ? `<span class="aide sous">SKU ${esc(p.sku)}</span>` : ''}</td>
           <td class="num" data-tri="${total(p)}"><strong>${total(p)}</strong></td>
           <td>${etatStock(total(p), seuil).badge}<span class="aide sous">${estActif(p) ? 'actif' : 'inactif'}</span></td>
-          <td class="num" data-tri="${p.stock.quantite}">${celluleStock(p.stock)}</td>
+          <td class="num" data-tri="${p.stock.quantite}">${celluleStock(p.stock)}${p.stock_total.incoherent
+            ? `<span class="sous" title="Chez Amazon + en transit (${p.stock_total.amazon + p.stock_total.en_transit}) dépasse les unités achetées sur vos factures (${p.stock_total.achetees}) : une facture manque probablement.">${badge('> acheté', 'alerte')}</span>` : ''}</td>
           <td class="num">${p.stock_total.en_transit}</td>
           <td class="num">${p.stock_total.a_envoyer}</td>
           <td class="num">${montant(p.cout_retenu)}${asinsEcart.has(p.asin) ? '<br>' + badge('écart', 'alerte') : ''}</td>
@@ -126,8 +128,8 @@ export async function pageAsins(zone) {
       q || filtre ? 'Aucun ASIN ne correspond à ces critères.' : 'Aucun ASIN : importez votre fichier d’inventaire ou déposez une facture.',
       { videAction: q || filtre ? { libelle: 'Voir tous les ASIN', href: '#/asins' } : { libelle: 'Déposer une facture', href: '#/factures' } },
     )}
-    <p class="aide">Stock total = chez Amazon (dernier import du fichier d’inventaire, avec l’écart depuis l’import précédent) + en transit (envoyé, réception non confirmée)
-      + à envoyer (acheté sur factures non annulées, pas encore expédié à Amazon). Dépensé = part des factures associées à l’ASIN, frais compris.</p>
+    <p class="aide">Stock total = chez Amazon (dernier import, qui remplace le précédent) + en transit + à envoyer. Le stock chez Amazon fait partie des unités achetées :
+      à envoyer = achetées sur factures − unités sorties (envoyées, ou vues chez Amazon, en transit ou vendues). « Amazon > acheté » signale une facture probablement manquante.</p>
     <details class="carte" id="bloc-import" ${importEnCours() ? 'open' : ''}><summary><strong>Importer le fichier d’inventaire</strong> (colonne cost = coût d’achat unitaire HT)</summary>
       <div id="inventaire" class="pile">${rendreInventaire()}</div></details>`;
 
@@ -211,13 +213,15 @@ export async function pageAsin(zone, asin) {
       ${tuile(p.stock_total.total, 'Stock total (Amazon + en transit + à envoyer)')}
       ${tuile(`${p.stock.quantite}${p.stock.ecart ? ` <span class="variation">${ecartTexte(p.stock.ecart)}</span>` : ''}`, 'Chez Amazon (dernier import)')}
       ${tuile(p.stock_total.en_transit, `En transit vers Amazon (${p.unites_recues_amazon} reçue(s) au total)`)}
-      ${tuile(p.stock_total.a_envoyer, `À envoyer : ${p.unites_achetees} achetée(s) − ${p.unites_envoyees} expédiée(s)`)}
+      ${tuile(p.stock_total.a_envoyer, `À envoyer (sur ${p.unites_achetees} achetée(s), hors Amazon, transit et ventes)`)}
       ${tuile(montant(cc.par_unite.achat), 'Coût d’achat HT retenu / unité')}
       ${tuile(montant(df.cout_moyen_unite), `Coût moyen facturé / unité (${df.unites} u.)`)}
       ${tuile(montant(cc.cout_complet_unitaire), 'Coût complet / unité')}
       ${tuile(montant(df.montant), `Dépense totale (${df.nb_factures} facture(s))`)}
     </div>
 
+    ${p.stock_total.incoherent ? `<div class="message alerte">Chez Amazon + en transit (${p.stock_total.amazon + p.stock_total.en_transit} unités) dépasse les unités achetées sur vos factures (${p.stock_total.achetees}).
+      Le stock chez Amazon ne peut pas dépasser ce qui a été acheté : une facture manque probablement pour cet ASIN.</div>` : ''}
     <div class="deux-colonnes">
       <div class="carte"><h3 class="sans-marge">Coût complet par unité ${formule('Coût complet = achat HT + frais des factures (au prorata) + frais d’envoi Amazon (au prorata des unités) + dépenses rattachées à l’ASIN.')}</h3>
         <table><tbody>

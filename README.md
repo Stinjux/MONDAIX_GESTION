@@ -91,10 +91,12 @@ Alternative cPanel : [docs/HEBERGEMENT-HOSTMETRO.md](docs/HEBERGEMENT-HOSTMETRO.
 
 ### Stock
 
-- **Stock total** d’un ASIN = **chez Amazon** (dernier import du fichier d’inventaire Amazon, comparé à l’import précédent)
-  + **en transit** (envoyé à Amazon, réception non confirmée) + **à envoyer** (unités des factures non annulées
-  pas encore expédiées à Amazon ; jamais négatif). Les états En stock / Stock bas / Rupture et Actif / Inactif
-  suivent ce stock total.
+- Chaque import du fichier d’inventaire Amazon **remplace** le stock chez Amazon (réimporter le même fichier ne change rien).
+- **Stock total** d’un ASIN = **chez Amazon** + **en transit** + **à envoyer**. Le stock chez Amazon fait partie des
+  unités achetées, il ne s’y ajoute pas : à envoyer = unités des factures non annulées − unités sorties, où les sorties
+  sont au moins les envois enregistrés et au moins ce qui est vu chez Amazon, en transit ou vendu (ventes estimées).
+- Si chez Amazon + en transit dépasse les unités achetées, l’ASIN est signalé « Amazon > acheté » (facture manquante).
+- Les états En stock / Stock bas / Rupture et Actif / Inactif suivent le stock total.
 
 ### 4. Envois Amazon et réception
 
